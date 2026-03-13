@@ -1,13 +1,19 @@
+mod config;
+
 use axum::{routing::get, Json, Router};
+use config::ServiceConfig;
 use serde_json::json;
-use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new().route("/health/live", get(live_health));
-    let address = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let config = ServiceConfig::from_env().unwrap_or_else(|error| {
+        eprintln!("configuration error: {error}");
+        std::process::exit(1);
+    });
 
-    let listener = tokio::net::TcpListener::bind(address)
+    let app = Router::new().route("/health/live", get(live_health));
+
+    let listener = tokio::net::TcpListener::bind(config.bind_address())
         .await
         .expect("failed to bind TCP listener");
 
