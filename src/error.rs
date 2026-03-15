@@ -30,12 +30,14 @@ impl Error for DomainError {}
 #[derive(Debug)]
 pub enum AppError {
     Domain(DomainError),
+    Database(sqlx::Error),
 }
 
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Domain(error) => write!(f, "{error}"),
+            Self::Database(error) => write!(f, "database error: {error}"),
         }
     }
 }
@@ -45,5 +47,11 @@ impl Error for AppError {}
 impl From<DomainError> for AppError {
     fn from(value: DomainError) -> Self {
         Self::Domain(value)
+    }
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(value: sqlx::Error) -> Self {
+        Self::Database(value)
     }
 }

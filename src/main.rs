@@ -2,6 +2,7 @@ mod app_state;
 mod config;
 mod domain;
 mod error;
+mod likes_repository;
 mod logging;
 
 use axum::{middleware, routing::get, Json, Router};
