@@ -1,4 +1,6 @@
 mod config;
+mod domain;
+mod error;
 mod logging;
 
 use axum::{middleware, routing::get, Json, Router};
