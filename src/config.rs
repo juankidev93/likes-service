@@ -3,6 +3,7 @@ use std::env;
 pub struct ServiceConfig {
     pub host: String,
     pub port: u16,
+    pub database_url: String,
 }
 
 impl ServiceConfig {
@@ -19,7 +20,18 @@ impl ServiceConfig {
             return Err("SERVICE_HOST cannot be empty".to_string());
         }
 
-        Ok(Self { host, port })
+        let database_url = env::var("DATABASE_URL")
+            .map_err(|_| "DATABASE_URL is required".to_string())?;
+
+        if database_url.trim().is_empty() {
+            return Err("DATABASE_URL cannot be empty".to_string());
+        }
+
+        Ok(Self {
+            host,
+            port,
+            database_url,
+        })
     }
 
     pub fn bind_address(&self) -> String {
