@@ -4,6 +4,7 @@ mod domain;
 mod error;
 mod likes_repository;
 mod logging;
+mod use_cases;
 
 use axum::{middleware, routing::get, Json, Router};
 use app_state::AppState;
