@@ -1,6 +1,7 @@
 mod app_state;
 mod auth_middleware;
 mod config;
+mod content_validation;
 mod content_registry;
 mod domain;
 mod error;
@@ -16,6 +17,7 @@ use axum::{middleware, routing::{delete, get, post}, Json, Router};
 use app_state::{AppState, MockProfile};
 use auth_middleware::require_auth;
 use config::ServiceConfig;
+use content_validation::ContentValidationClient;
 use content_registry::{ContentApiDefinition, ContentTypeRegistry};
 use http::{
     create_like, delete_like, get_like_count, get_like_counts_batch, get_like_status,
@@ -111,6 +113,7 @@ async fn main() {
             base_url: config.top_picks_content_api_base_url.clone(),
         },
     ]);
+    let content_validation_client = ContentValidationClient::new(content_type_registry.clone());
 
     let app_state = AppState {
         db_pool,
@@ -118,6 +121,7 @@ async fn main() {
         mock_profiles,
         mock_content_store,
         content_type_registry,
+        content_validation_client,
         profile_api_client,
     };
 

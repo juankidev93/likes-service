@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::content_validation::ContentValidationClient;
 use crate::content_registry::ContentTypeRegistry;
 use crate::profile_api_client::ProfileApiClient;
 use redis::Client as RedisClient;
@@ -13,6 +14,7 @@ pub struct AppState {
     pub mock_profiles: HashMap<String, MockProfile>,
     pub mock_content_store: HashMap<String, HashSet<String>>,
     pub content_type_registry: ContentTypeRegistry,
+    pub content_validation_client: ContentValidationClient,
     pub profile_api_client: ProfileApiClient,
 }
 
