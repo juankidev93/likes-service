@@ -1,5 +1,5 @@
 use axum::{
-    extract::Request,
+    extract::{MatchedPath, Request},
     http::{header::HeaderName, HeaderValue},
     middleware::Next,
     response::Response,
@@ -26,7 +26,12 @@ pub fn init_tracing() {
 
 pub async fn request_logging_middleware(mut request: Request, next: Next) -> Response {
     let method = request.method().to_string();
-    let path = request.uri().path().to_string();
+    let path = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+        .unwrap_or_else(|| request.uri().path())
+        .to_string();
     let request_id = request
         .headers()
         .get(REQUEST_ID_HEADER)
