@@ -27,17 +27,17 @@ pub async fn create_like(
 ) -> Response {
     let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
-        Err(response) => return response.into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let content_type = match ContentType::from_str(&payload.content_type) {
         Ok(value) => value,
-        Err(error) => return bad_request(error.to_string()).into_response(),
+        Err(error) => return AppError::from(error).into_response(),
     };
 
     let content_id = match ContentId::from_str(&payload.content_id) {
         Ok(value) => value,
-        Err(error) => return bad_request(error.to_string()).into_response(),
+        Err(error) => return AppError::from(error).into_response(),
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
@@ -52,7 +52,7 @@ pub async fn create_like(
         .await
     {
         Ok(result) => success(Json(LikeResponse::from(result))).into_response(),
-        Err(error) => internal_error(error).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -63,17 +63,17 @@ pub async fn delete_like(
 ) -> Response {
     let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
-        Err(response) => return response.into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let content_type = match ContentType::from_str(&content_type) {
         Ok(value) => value,
-        Err(error) => return bad_request(error.to_string()).into_response(),
+        Err(error) => return AppError::from(error).into_response(),
     };
 
     let content_id = match ContentId::from_str(&content_id) {
         Ok(value) => value,
-        Err(error) => return bad_request(error.to_string()).into_response(),
+        Err(error) => return AppError::from(error).into_response(),
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
@@ -88,7 +88,7 @@ pub async fn delete_like(
         .await
     {
         Ok(result) => success(Json(UnlikeResponse::from(result))).into_response(),
-        Err(error) => internal_error(error).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -99,17 +99,17 @@ pub async fn get_like_status(
 ) -> Response {
     let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
-        Err(response) => return response.into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let content_type = match ContentType::from_str(&content_type) {
         Ok(value) => value,
-        Err(error) => return bad_request(error.to_string()).into_response(),
+        Err(error) => return AppError::from(error).into_response(),
     };
 
     let content_id = match ContentId::from_str(&content_id) {
         Ok(value) => value,
-        Err(error) => return bad_request(error.to_string()).into_response(),
+        Err(error) => return AppError::from(error).into_response(),
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
@@ -119,7 +119,7 @@ pub async fn get_like_status(
         .await
     {
         Ok(status) => success(Json(LikeStatusResponse::from(status))).into_response(),
-        Err(error) => internal_error(error).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -129,12 +129,12 @@ pub async fn get_like_count(
 ) -> Response {
     let content_type = match ContentType::from_str(&content_type) {
         Ok(value) => value,
-        Err(error) => return bad_request(error.to_string()).into_response(),
+        Err(error) => return AppError::from(error).into_response(),
     };
 
     let content_id = match ContentId::from_str(&content_id) {
         Ok(value) => value,
-        Err(error) => return bad_request(error.to_string()).into_response(),
+        Err(error) => return AppError::from(error).into_response(),
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
@@ -145,18 +145,18 @@ pub async fn get_like_count(
             return success(Json(LikeCountResponse { count })).into_response();
         }
         Ok(None) => {}
-        Err(error) => return internal_error(error).into_response(),
+        Err(error) => return error.into_response(),
     }
 
     match repository.get_like_count(&content_type, &content_id).await {
         Ok(count) => {
             if let Err(error) = cache_like_count(&state, &cache_key, count.count).await {
-                return internal_error(error).into_response();
+                return error.into_response();
             }
 
             success(Json(LikeCountResponse::from(count))).into_response()
         }
-        Err(error) => internal_error(error).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -167,18 +167,18 @@ pub async fn list_user_likes(
 ) -> Response {
     let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
-        Err(response) => return response.into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let limit = match parse_limit(query.limit) {
         Ok(value) => value,
-        Err(response) => return response.into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let content_type = match query.content_type {
         Some(value) => match ContentType::from_str(&value) {
             Ok(content_type) => Some(content_type),
-            Err(error) => return bad_request(error.to_string()).into_response(),
+            Err(error) => return AppError::from(error).into_response(),
         },
         None => None,
     };
@@ -186,7 +186,7 @@ pub async fn list_user_likes(
     let cursor = match query.cursor {
         Some(value) => match decode_cursor(&value) {
             Ok(cursor) => Some(cursor),
-            Err(response) => return response.into_response(),
+            Err(error) => return error.into_response(),
         },
         None => None,
     };
@@ -197,7 +197,7 @@ pub async fn list_user_likes(
         .await
     {
         Ok(rows) => rows,
-        Err(error) => return internal_error(error).into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let has_next_page = rows.len() > limit;
@@ -230,12 +230,12 @@ pub async fn get_like_counts_batch(
     Json(payload): Json<BatchLikesRequest>,
 ) -> Response {
     if payload.items.len() > MAX_BATCH_ITEMS {
-        return bad_request("BATCH_TOO_LARGE".to_string()).into_response();
+        return AppError::invalid_request("BATCH_TOO_LARGE", "batch too large").into_response();
     }
 
     let parsed_items = match parse_batch_items(&payload.items) {
         Ok(items) => items,
-        Err(response) => return response.into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let cache_keys: Vec<String> = parsed_items
@@ -245,7 +245,7 @@ pub async fn get_like_counts_batch(
 
     let cached_counts = match get_cached_like_counts(&state, &cache_keys).await {
         Ok(values) => values,
-        Err(error) => return internal_error(error).into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let mut counts_by_item: HashMap<(String, String), i64> = HashMap::new();
@@ -265,7 +265,7 @@ pub async fn get_like_counts_batch(
         let repository = PostgresLikesRepository::new(&state.db_pool);
         let postgres_counts = match repository.get_like_counts_batch(&missing_items).await {
             Ok(values) => values,
-            Err(error) => return internal_error(error).into_response(),
+            Err(error) => return error.into_response(),
         };
 
         for (content_type, content_id) in &missing_items {
@@ -278,7 +278,7 @@ pub async fn get_like_counts_batch(
                 cache_like_count(&state, &like_count_cache_key(content_type, content_id), count)
                     .await
             {
-                return internal_error(error).into_response();
+                return error.into_response();
             }
         }
     }
@@ -303,17 +303,17 @@ pub async fn get_like_statuses_batch(
     Json(payload): Json<BatchLikesRequest>,
 ) -> Response {
     if payload.items.len() > MAX_BATCH_ITEMS {
-        return bad_request("BATCH_TOO_LARGE".to_string()).into_response();
+        return AppError::invalid_request("BATCH_TOO_LARGE", "batch too large").into_response();
     }
 
     let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
-        Err(response) => return response.into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let parsed_items = match parse_batch_items(&payload.items) {
         Ok(items) => items,
-        Err(response) => return response.into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
@@ -322,7 +322,7 @@ pub async fn get_like_statuses_batch(
         .await
     {
         Ok(values) => values,
-        Err(error) => return internal_error(error).into_response(),
+        Err(error) => return error.into_response(),
     };
 
     let items = parsed_items
@@ -463,62 +463,28 @@ pub struct UserLikeItemResponse {
     pub liked_at: String,
 }
 
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-}
-
 fn parse_authenticated_user_id(
     authenticated_user: &AuthenticatedUser,
-) -> Result<UserId, (StatusCode, Json<ErrorResponse>)> {
-    UserId::from_str(&authenticated_user.user_id).map_err(|error| {
-        internal_error(AppError::Domain(error))
-    })
+) -> Result<UserId, AppError> {
+    UserId::from_str(&authenticated_user.user_id).map_err(AppError::from)
 }
 
 fn success<T>(payload: Json<T>) -> (StatusCode, Json<T>) {
     (StatusCode::OK, payload)
 }
 
-fn bad_request(message: String) -> (StatusCode, Json<ErrorResponse>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(ErrorResponse { error: message }),
-    )
-}
-
-fn internal_error(error: AppError) -> (StatusCode, Json<ErrorResponse>) {
-    let status = match &error {
-        AppError::Domain(_) => StatusCode::BAD_REQUEST,
-        AppError::ContentValidation(content_error) => match content_error {
-            crate::content_validation::ContentValidationError::ContentTypeUnknown(_) => {
-                StatusCode::BAD_REQUEST
-            }
-            crate::content_validation::ContentValidationError::ContentNotFound { .. } => {
-                StatusCode::NOT_FOUND
-            }
-            crate::content_validation::ContentValidationError::DependencyUnavailable(_)
-            | crate::content_validation::ContentValidationError::NetworkError(_) => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
-        },
-        AppError::Database(_) | AppError::Cache(_) => StatusCode::INTERNAL_SERVER_ERROR,
-    };
-
-    (status, Json(ErrorResponse { error: error.to_string() }))
-}
-
 fn like_count_cache_key(content_type: &ContentType, content_id: &ContentId) -> String {
     format!("likes:count:{content_type}:{content_id}")
 }
 
-fn parse_limit(limit: Option<usize>) -> Result<usize, (StatusCode, Json<ErrorResponse>)> {
+fn parse_limit(limit: Option<usize>) -> Result<usize, AppError> {
     let limit = limit.unwrap_or(DEFAULT_USER_LIKES_LIMIT);
 
     if limit == 0 || limit > MAX_BATCH_ITEMS {
-        return Err(bad_request(format!(
-            "limit must be between 1 and {MAX_BATCH_ITEMS}"
-        )));
+        return Err(AppError::invalid_request(
+            "INVALID_REQUEST",
+            format!("limit must be between 1 and {MAX_BATCH_ITEMS}"),
+        ));
     }
 
     Ok(limit)
@@ -529,20 +495,20 @@ fn encode_cursor(row: &UserLikeRow) -> String {
     STANDARD.encode(raw)
 }
 
-fn decode_cursor(value: &str) -> Result<LikesCursor, (StatusCode, Json<ErrorResponse>)> {
+fn decode_cursor(value: &str) -> Result<LikesCursor, AppError> {
     let decoded = STANDARD
         .decode(value)
-        .map_err(|_| bad_request("invalid cursor".to_string()))?;
+        .map_err(|_| AppError::invalid_request("INVALID_REQUEST", "invalid cursor"))?;
 
     let decoded =
-        String::from_utf8(decoded).map_err(|_| bad_request("invalid cursor".to_string()))?;
+        String::from_utf8(decoded).map_err(|_| AppError::invalid_request("INVALID_REQUEST", "invalid cursor"))?;
 
     let (liked_at, content_id) = decoded
         .split_once('|')
-        .ok_or_else(|| bad_request("invalid cursor".to_string()))?;
+        .ok_or_else(|| AppError::invalid_request("INVALID_REQUEST", "invalid cursor"))?;
 
     if liked_at.is_empty() || content_id.is_empty() {
-        return Err(bad_request("invalid cursor".to_string()));
+        return Err(AppError::invalid_request("INVALID_REQUEST", "invalid cursor"));
     }
 
     Ok(LikesCursor {
@@ -587,15 +553,15 @@ async fn cache_like_count(state: &AppState, key: &str, count: i64) -> Result<(),
 
 fn parse_batch_items(
     items: &[BatchLikeItemRequest],
-) -> Result<Vec<(ContentType, ContentId)>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Vec<(ContentType, ContentId)>, AppError> {
     items
         .iter()
         .map(|item| {
             let content_type = ContentType::from_str(&item.content_type)
-                .map_err(|error| bad_request(error.to_string()))?;
+                .map_err(AppError::from)?;
 
             let content_id = ContentId::from_str(&item.content_id)
-                .map_err(|error| bad_request(error.to_string()))?;
+                .map_err(AppError::from)?;
 
             Ok((content_type, content_id))
         })

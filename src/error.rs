@@ -1,6 +1,12 @@
 #![allow(dead_code)]
 
 use crate::content_validation::ContentValidationError;
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde::Serialize;
 use std::{error::Error, fmt};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,6 +36,18 @@ impl Error for DomainError {}
 
 #[derive(Debug)]
 pub enum AppError {
+    InvalidRequest {
+        code: &'static str,
+        message: String,
+    },
+    Unauthorized {
+        code: &'static str,
+        message: String,
+    },
+    DependencyUnavailable {
+        code: &'static str,
+        message: String,
+    },
     Domain(DomainError),
     ContentValidation(ContentValidationError),
     Database(sqlx::Error),
@@ -39,6 +57,9 @@ pub enum AppError {
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidRequest { message, .. } => write!(f, "{message}"),
+            Self::Unauthorized { message, .. } => write!(f, "{message}"),
+            Self::DependencyUnavailable { message, .. } => write!(f, "{message}"),
             Self::Domain(error) => write!(f, "{error}"),
             Self::ContentValidation(error) => write!(f, "{error}"),
             Self::Database(error) => write!(f, "database error: {error}"),
@@ -71,4 +92,112 @@ impl From<redis::RedisError> for AppError {
     fn from(value: redis::RedisError) -> Self {
         Self::Cache(value)
     }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, code, message) = self.as_http_error();
+
+        (
+            status,
+            Json(HttpErrorBody {
+                error: HttpErrorDetail {
+                    code,
+                    message,
+                },
+            }),
+        )
+            .into_response()
+    }
+}
+
+impl AppError {
+    pub fn invalid_request(code: &'static str, message: impl Into<String>) -> Self {
+        Self::InvalidRequest {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn unauthorized(code: &'static str, message: impl Into<String>) -> Self {
+        Self::Unauthorized {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn dependency_unavailable(
+        code: &'static str,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::DependencyUnavailable {
+            code,
+            message: message.into(),
+        }
+    }
+
+    fn as_http_error(self) -> (StatusCode, &'static str, String) {
+        match self {
+            Self::InvalidRequest { code, message } => (StatusCode::BAD_REQUEST, code, message),
+            Self::Unauthorized { code, message } => (StatusCode::UNAUTHORIZED, code, message),
+            Self::DependencyUnavailable { code, message } => {
+                (StatusCode::SERVICE_UNAVAILABLE, code, message)
+            }
+            Self::Domain(error) => match error {
+                DomainError::InvalidContentType(_) => (
+                    StatusCode::BAD_REQUEST,
+                    "INVALID_REQUEST",
+                    "invalid content type".to_string(),
+                ),
+                DomainError::InvalidContentId(_) => (
+                    StatusCode::BAD_REQUEST,
+                    "INVALID_REQUEST",
+                    "invalid content id".to_string(),
+                ),
+                DomainError::InvalidUserId(_) => (
+                    StatusCode::BAD_REQUEST,
+                    "INVALID_REQUEST",
+                    "invalid user id".to_string(),
+                ),
+            },
+            Self::ContentValidation(error) => match error {
+                ContentValidationError::ContentTypeUnknown(_) => (
+                    StatusCode::BAD_REQUEST,
+                    "CONTENT_TYPE_UNKNOWN",
+                    "content type unknown".to_string(),
+                ),
+                ContentValidationError::ContentNotFound { .. } => (
+                    StatusCode::NOT_FOUND,
+                    "CONTENT_NOT_FOUND",
+                    "content not found".to_string(),
+                ),
+                ContentValidationError::DependencyUnavailable(_) => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "DEPENDENCY_UNAVAILABLE",
+                    "dependency unavailable".to_string(),
+                ),
+                ContentValidationError::NetworkError(_) => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "DEPENDENCY_UNAVAILABLE",
+                    "dependency unavailable".to_string(),
+                ),
+            },
+            Self::Database(_) | Self::Cache(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_ERROR",
+                "internal error".to_string(),
+            ),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct HttpErrorBody {
+    error: HttpErrorDetail,
+}
+
+#[derive(Serialize)]
+struct HttpErrorDetail {
+    code: &'static str,
+    message: String,
 }
