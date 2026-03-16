@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::content_validation::ContentValidationError;
 use std::{error::Error, fmt};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,6 +31,7 @@ impl Error for DomainError {}
 #[derive(Debug)]
 pub enum AppError {
     Domain(DomainError),
+    ContentValidation(ContentValidationError),
     Database(sqlx::Error),
     Cache(redis::RedisError),
 }
@@ -38,6 +40,7 @@ impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Domain(error) => write!(f, "{error}"),
+            Self::ContentValidation(error) => write!(f, "{error}"),
             Self::Database(error) => write!(f, "database error: {error}"),
             Self::Cache(error) => write!(f, "cache error: {error}"),
         }
@@ -49,6 +52,12 @@ impl Error for AppError {}
 impl From<DomainError> for AppError {
     fn from(value: DomainError) -> Self {
         Self::Domain(value)
+    }
+}
+
+impl From<ContentValidationError> for AppError {
+    fn from(value: ContentValidationError) -> Self {
+        Self::ContentValidation(value)
     }
 }
 

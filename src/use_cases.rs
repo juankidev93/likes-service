@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::content_validation::ContentValidationClient;
 use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
 use crate::likes_repository::{
@@ -12,13 +13,19 @@ const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;
 pub struct LikesUseCases<'a> {
     repository: PostgresLikesRepository<'a>,
     redis_client: RedisClient,
+    content_validation_client: ContentValidationClient,
 }
 
 impl<'a> LikesUseCases<'a> {
-    pub fn new(repository: PostgresLikesRepository<'a>, redis_client: RedisClient) -> Self {
+    pub fn new(
+        repository: PostgresLikesRepository<'a>,
+        redis_client: RedisClient,
+        content_validation_client: ContentValidationClient,
+    ) -> Self {
         Self {
             repository,
             redis_client,
+            content_validation_client,
         }
     }
 
@@ -28,6 +35,8 @@ impl<'a> LikesUseCases<'a> {
         content_type: &ContentType,
         content_id: &ContentId,
     ) -> Result<LikeContentResult, AppError> {
+        self.validate_content(content_type, content_id).await?;
+
         let result = self
             .repository
             .insert_like(user_id, content_type, content_id)
@@ -48,6 +57,8 @@ impl<'a> LikesUseCases<'a> {
         content_type: &ContentType,
         content_id: &ContentId,
     ) -> Result<UnlikeContentResult, AppError> {
+        self.validate_content(content_type, content_id).await?;
+
         let result = self
             .repository
             .delete_like(user_id, content_type, content_id)
@@ -61,6 +72,18 @@ impl<'a> LikesUseCases<'a> {
             }
             DeleteLikeResult::NotFound => UnlikeContentResult::NotLiked,
         })
+    }
+
+    async fn validate_content(
+        &self,
+        content_type: &ContentType,
+        content_id: &ContentId,
+    ) -> Result<(), AppError> {
+        self.content_validation_client
+            .validate_content(content_type.as_str(), &content_id.to_string())
+            .await?;
+
+        Ok(())
     }
 
     async fn increment_cached_like_count(

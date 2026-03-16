@@ -41,7 +41,11 @@ pub async fn create_like(
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
-    let use_cases = LikesUseCases::new(repository, state.redis_client.clone());
+    let use_cases = LikesUseCases::new(
+        repository,
+        state.redis_client.clone(),
+        state.content_validation_client.clone(),
+    );
 
     match use_cases
         .like_content(&user_id, &content_type, &content_id)
@@ -73,7 +77,11 @@ pub async fn delete_like(
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
-    let use_cases = LikesUseCases::new(repository, state.redis_client.clone());
+    let use_cases = LikesUseCases::new(
+        repository,
+        state.redis_client.clone(),
+        state.content_validation_client.clone(),
+    );
 
     match use_cases
         .unlike_content(&user_id, &content_type, &content_id)
@@ -480,12 +488,24 @@ fn bad_request(message: String) -> (StatusCode, Json<ErrorResponse>) {
 }
 
 fn internal_error(error: AppError) -> (StatusCode, Json<ErrorResponse>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ErrorResponse {
-            error: error.to_string(),
-        }),
-    )
+    let status = match &error {
+        AppError::Domain(_) => StatusCode::BAD_REQUEST,
+        AppError::ContentValidation(content_error) => match content_error {
+            crate::content_validation::ContentValidationError::ContentTypeUnknown(_) => {
+                StatusCode::BAD_REQUEST
+            }
+            crate::content_validation::ContentValidationError::ContentNotFound { .. } => {
+                StatusCode::NOT_FOUND
+            }
+            crate::content_validation::ContentValidationError::DependencyUnavailable(_)
+            | crate::content_validation::ContentValidationError::NetworkError(_) => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+        },
+        AppError::Database(_) | AppError::Cache(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    (status, Json(ErrorResponse { error: error.to_string() }))
 }
 
 fn like_count_cache_key(content_type: &ContentType, content_id: &ContentId) -> String {
