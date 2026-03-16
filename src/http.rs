@@ -1,19 +1,21 @@
 use crate::app_state::AppState;
 use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
-use crate::likes_repository::PostgresLikesRepository;
+use crate::likes_repository::{LikesCursor, PostgresLikesRepository, UserLikeRow};
 use crate::use_cases::{LikeContentResult, LikesUseCases, UnlikeContentResult};
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 
+const DEFAULT_USER_LIKES_LIMIT: usize = 20;
 const MAX_BATCH_ITEMS: usize = 100;
 const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;
 
@@ -147,6 +149,71 @@ pub async fn get_like_count(
         }
         Err(error) => internal_error(error).into_response(),
     }
+}
+
+pub async fn list_user_likes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<UserLikesQuery>,
+) -> Response {
+    let user_id = match parse_user_id(&headers) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+
+    let limit = match parse_limit(query.limit) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+
+    let content_type = match query.content_type {
+        Some(value) => match ContentType::from_str(&value) {
+            Ok(content_type) => Some(content_type),
+            Err(error) => return bad_request(error.to_string()).into_response(),
+        },
+        None => None,
+    };
+
+    let cursor = match query.cursor {
+        Some(value) => match decode_cursor(&value) {
+            Ok(cursor) => Some(cursor),
+            Err(response) => return response.into_response(),
+        },
+        None => None,
+    };
+
+    let repository = PostgresLikesRepository::new(&state.db_pool);
+    let rows = match repository
+        .list_user_likes(&user_id, content_type.as_ref(), cursor.as_ref(), limit + 1)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => return internal_error(error).into_response(),
+    };
+
+    let has_next_page = rows.len() > limit;
+    let page_rows = if has_next_page {
+        rows[..limit].to_vec()
+    } else {
+        rows
+    };
+
+    let next_cursor = if has_next_page {
+        page_rows.last().map(encode_cursor)
+    } else {
+        None
+    };
+
+    let items = page_rows
+        .into_iter()
+        .map(|row| UserLikeItemResponse {
+            content_type: row.content_type,
+            content_id: row.content_id,
+            liked_at: row.liked_at,
+        })
+        .collect();
+
+    success(Json(UserLikesResponse { items, next_cursor })).into_response()
 }
 
 pub async fn get_like_counts_batch(
@@ -284,6 +351,13 @@ pub struct BatchLikeItemRequest {
     pub content_id: String,
 }
 
+#[derive(Deserialize)]
+pub struct UserLikesQuery {
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+    pub content_type: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct LikeResponse {
     pub result: &'static str,
@@ -368,6 +442,19 @@ pub struct BatchLikeStatusItemResponse {
 }
 
 #[derive(Serialize)]
+pub struct UserLikesResponse {
+    pub items: Vec<UserLikeItemResponse>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UserLikeItemResponse {
+    pub content_type: String,
+    pub content_id: String,
+    pub liked_at: String,
+}
+
+#[derive(Serialize)]
 struct ErrorResponse {
     error: String,
 }
@@ -406,6 +493,45 @@ fn internal_error(error: AppError) -> (StatusCode, Json<ErrorResponse>) {
 
 fn like_count_cache_key(content_type: &ContentType, content_id: &ContentId) -> String {
     format!("likes:count:{content_type}:{content_id}")
+}
+
+fn parse_limit(limit: Option<usize>) -> Result<usize, (StatusCode, Json<ErrorResponse>)> {
+    let limit = limit.unwrap_or(DEFAULT_USER_LIKES_LIMIT);
+
+    if limit == 0 || limit > MAX_BATCH_ITEMS {
+        return Err(bad_request(format!(
+            "limit must be between 1 and {MAX_BATCH_ITEMS}"
+        )));
+    }
+
+    Ok(limit)
+}
+
+fn encode_cursor(row: &UserLikeRow) -> String {
+    let raw = format!("{}|{}", row.liked_at, row.content_id);
+    STANDARD.encode(raw)
+}
+
+fn decode_cursor(value: &str) -> Result<LikesCursor, (StatusCode, Json<ErrorResponse>)> {
+    let decoded = STANDARD
+        .decode(value)
+        .map_err(|_| bad_request("invalid cursor".to_string()))?;
+
+    let decoded =
+        String::from_utf8(decoded).map_err(|_| bad_request("invalid cursor".to_string()))?;
+
+    let (liked_at, content_id) = decoded
+        .split_once('|')
+        .ok_or_else(|| bad_request("invalid cursor".to_string()))?;
+
+    if liked_at.is_empty() || content_id.is_empty() {
+        return Err(bad_request("invalid cursor".to_string()));
+    }
+
+    Ok(LikesCursor {
+        liked_at: liked_at.to_string(),
+        content_id: content_id.to_string(),
+    })
 }
 
 async fn get_cached_like_count(

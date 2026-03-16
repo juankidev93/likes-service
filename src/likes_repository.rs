@@ -208,6 +208,106 @@ impl<'a> PostgresLikesRepository<'a> {
             })
             .collect())
     }
+
+    pub async fn list_user_likes(
+        &self,
+        user_id: &UserId,
+        content_type: Option<&ContentType>,
+        cursor: Option<&LikesCursor>,
+        limit: usize,
+    ) -> Result<Vec<UserLikeRow>, AppError> {
+        let rows: Vec<(String, String, String)> = match (content_type, cursor) {
+            (Some(content_type), Some(cursor)) => {
+                sqlx::query_as(
+                    r#"
+                    SELECT content_type, content_id,
+                           to_char(liked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                    FROM likes
+                    WHERE user_id = $1
+                      AND content_type = $2
+                      AND (
+                        liked_at < $3::timestamptz
+                        OR (liked_at = $3::timestamptz AND content_id < $4)
+                      )
+                    ORDER BY liked_at DESC, content_id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(user_id.to_string())
+                .bind(content_type.to_string())
+                .bind(cursor.liked_at.as_str())
+                .bind(cursor.content_id.to_string())
+                .bind(limit as i64)
+                .fetch_all(self.db_pool)
+                .await?
+            }
+            (Some(content_type), None) => {
+                sqlx::query_as(
+                    r#"
+                    SELECT content_type, content_id,
+                           to_char(liked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                    FROM likes
+                    WHERE user_id = $1
+                      AND content_type = $2
+                    ORDER BY liked_at DESC, content_id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(user_id.to_string())
+                .bind(content_type.to_string())
+                .bind(limit as i64)
+                .fetch_all(self.db_pool)
+                .await?
+            }
+            (None, Some(cursor)) => {
+                sqlx::query_as(
+                    r#"
+                    SELECT content_type, content_id,
+                           to_char(liked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                    FROM likes
+                    WHERE user_id = $1
+                      AND (
+                        liked_at < $2::timestamptz
+                        OR (liked_at = $2::timestamptz AND content_id < $3)
+                      )
+                    ORDER BY liked_at DESC, content_id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(user_id.to_string())
+                .bind(cursor.liked_at.as_str())
+                .bind(cursor.content_id.to_string())
+                .bind(limit as i64)
+                .fetch_all(self.db_pool)
+                .await?
+            }
+            (None, None) => {
+                sqlx::query_as(
+                    r#"
+                    SELECT content_type, content_id,
+                           to_char(liked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+                    FROM likes
+                    WHERE user_id = $1
+                    ORDER BY liked_at DESC, content_id DESC
+                    LIMIT $2
+                    "#,
+                )
+                .bind(user_id.to_string())
+                .bind(limit as i64)
+                .fetch_all(self.db_pool)
+                .await?
+            }
+        };
+
+        Ok(rows
+            .into_iter()
+            .map(|(content_type, content_id, liked_at)| UserLikeRow {
+                content_type,
+                content_id,
+                liked_at,
+            })
+            .collect())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -231,4 +331,17 @@ pub struct LikeStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LikeCount {
     pub count: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LikesCursor {
+    pub liked_at: String,
+    pub content_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserLikeRow {
+    pub content_type: String,
+    pub content_id: String,
+    pub liked_at: String,
 }

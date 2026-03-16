@@ -711,6 +711,7 @@ name = "likes-service"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "redis",
  "serde",
  "serde_json",

@@ -12,7 +12,7 @@ use app_state::AppState;
 use config::ServiceConfig;
 use http::{
     create_like, delete_like, get_like_count, get_like_counts_batch, get_like_status,
-    get_like_statuses_batch,
+    get_like_statuses_batch, list_user_likes,
 };
 use logging::{init_tracing, request_logging_middleware};
 use redis::AsyncCommands;
@@ -67,6 +67,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health/live", get(live_health))
+        .route("/v1/likes/user", get(list_user_likes))
         .route("/v1/likes", post(create_like))
         .route("/v1/likes/batch/counts", post(get_like_counts_batch))
         .route("/v1/likes/batch/statuses", post(get_like_statuses_batch))
