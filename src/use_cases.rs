@@ -42,12 +42,25 @@ impl<'a> LikesUseCases<'a> {
             .insert_like(user_id, content_type, content_id)
             .await?;
 
-        Ok(match result {
+        let already_existed = match result {
             InsertLikeResult::Inserted => {
                 self.increment_cached_like_count(content_type, content_id).await?;
-                LikeContentResult::Liked
+                false
             }
-            InsertLikeResult::AlreadyExists => LikeContentResult::AlreadyLiked,
+            InsertLikeResult::AlreadyExists => true,
+        };
+
+        let like_status = self
+            .repository
+            .get_like_status(user_id, content_type, content_id)
+            .await?;
+        let like_count = self.repository.get_like_count(content_type, content_id).await?;
+
+        Ok(LikeContentResult {
+            liked: true,
+            already_existed,
+            count: like_count.count,
+            liked_at: like_status.liked_at,
         })
     }
 
@@ -64,13 +77,21 @@ impl<'a> LikesUseCases<'a> {
             .delete_like(user_id, content_type, content_id)
             .await?;
 
-        Ok(match result {
+        let was_liked = match result {
             DeleteLikeResult::Deleted => {
                 self.decrement_cached_like_count(content_type, content_id)
                     .await?;
-                UnlikeContentResult::Unliked
+                true
             }
-            DeleteLikeResult::NotFound => UnlikeContentResult::NotLiked,
+            DeleteLikeResult::NotFound => false,
+        };
+
+        let like_count = self.repository.get_like_count(content_type, content_id).await?;
+
+        Ok(UnlikeContentResult {
+            liked: false,
+            was_liked,
+            count: like_count.count,
         })
     }
 
@@ -126,16 +147,19 @@ impl<'a> LikesUseCases<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LikeContentResult {
-    Liked,
-    AlreadyLiked,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LikeContentResult {
+    pub liked: bool,
+    pub already_existed: bool,
+    pub count: i64,
+    pub liked_at: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnlikeContentResult {
-    Unliked,
-    NotLiked,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnlikeContentResult {
+    pub liked: bool,
+    pub was_liked: bool,
+    pub count: i64,
 }
 
 fn like_count_cache_key(content_type: &ContentType, content_id: &ContentId) -> String {

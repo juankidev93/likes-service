@@ -51,7 +51,15 @@ pub async fn create_like(
         .like_content(&user_id, &content_type, &content_id)
         .await
     {
-        Ok(result) => success(Json(LikeResponse::from(result))).into_response(),
+        Ok(result) => {
+            let status = if result.already_existed {
+                StatusCode::OK
+            } else {
+                StatusCode::CREATED
+            };
+
+            (status, Json(LikeResponse::from(result))).into_response()
+        }
         Err(error) => error.into_response(),
     }
 }
@@ -142,7 +150,12 @@ pub async fn get_like_count(
 
     match get_cached_like_count(&state, &cache_key).await {
         Ok(Some(count)) => {
-            return success(Json(LikeCountResponse { count })).into_response();
+            return success(Json(LikeCountResponse {
+                content_type: content_type.to_string(),
+                content_id: content_id.to_string(),
+                count,
+            }))
+            .into_response();
         }
         Ok(None) => {}
         Err(error) => return error.into_response(),
@@ -154,7 +167,12 @@ pub async fn get_like_count(
                 return error.into_response();
             }
 
-            success(Json(LikeCountResponse::from(count))).into_response()
+            success(Json(LikeCountResponse::from_parts(
+                &content_type,
+                &content_id,
+                count.count,
+            )))
+            .into_response()
         }
         Err(error) => error.into_response(),
     }
@@ -369,32 +387,36 @@ pub struct UserLikesQuery {
 
 #[derive(Serialize)]
 pub struct LikeResponse {
-    pub result: &'static str,
+    pub liked: bool,
+    pub already_existed: bool,
+    pub count: i64,
+    pub liked_at: Option<String>,
 }
 
 impl From<LikeContentResult> for LikeResponse {
     fn from(value: LikeContentResult) -> Self {
-        match value {
-            LikeContentResult::Liked => Self { result: "liked" },
-            LikeContentResult::AlreadyLiked => Self {
-                result: "already_liked",
-            },
+        Self {
+            liked: value.liked,
+            already_existed: value.already_existed,
+            count: value.count,
+            liked_at: value.liked_at,
         }
     }
 }
 
 #[derive(Serialize)]
 pub struct UnlikeResponse {
-    pub result: &'static str,
+    pub liked: bool,
+    pub was_liked: bool,
+    pub count: i64,
 }
 
 impl From<UnlikeContentResult> for UnlikeResponse {
     fn from(value: UnlikeContentResult) -> Self {
-        match value {
-            UnlikeContentResult::Unliked => Self { result: "unliked" },
-            UnlikeContentResult::NotLiked => Self {
-                result: "not_liked",
-            },
+        Self {
+            liked: value.liked,
+            was_liked: value.was_liked,
+            count: value.count,
         }
     }
 }
@@ -416,12 +438,18 @@ impl From<crate::likes_repository::LikeStatus> for LikeStatusResponse {
 
 #[derive(Serialize)]
 pub struct LikeCountResponse {
+    pub content_type: String,
+    pub content_id: String,
     pub count: i64,
 }
 
-impl From<crate::likes_repository::LikeCount> for LikeCountResponse {
-    fn from(value: crate::likes_repository::LikeCount) -> Self {
-        Self { count: value.count }
+impl LikeCountResponse {
+    fn from_parts(content_type: &ContentType, content_id: &ContentId, count: i64) -> Self {
+        Self {
+            content_type: content_type.to_string(),
+            content_id: content_id.to_string(),
+            count,
+        }
     }
 }
 
