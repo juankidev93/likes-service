@@ -76,6 +76,37 @@ pub async fn delete_like(
     }
 }
 
+pub async fn get_like_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((content_type, content_id)): Path<(String, String)>,
+) -> Response {
+    let user_id = match parse_user_id(&headers) {
+        Ok(value) => value,
+        Err(response) => return response.into_response(),
+    };
+
+    let content_type = match ContentType::from_str(&content_type) {
+        Ok(value) => value,
+        Err(error) => return bad_request(error.to_string()).into_response(),
+    };
+
+    let content_id = match ContentId::from_str(&content_id) {
+        Ok(value) => value,
+        Err(error) => return bad_request(error.to_string()).into_response(),
+    };
+
+    let repository = PostgresLikesRepository::new(&state.db_pool);
+
+    match repository
+        .get_like_status(&user_id, &content_type, &content_id)
+        .await
+    {
+        Ok(status) => success(Json(LikeStatusResponse::from(status))).into_response(),
+        Err(error) => internal_error(error).into_response(),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct CreateLikeRequest {
     pub content_type: String,
@@ -110,6 +141,21 @@ impl From<UnlikeContentResult> for UnlikeResponse {
             UnlikeContentResult::NotLiked => Self {
                 result: "not_liked",
             },
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct LikeStatusResponse {
+    pub liked: bool,
+    pub liked_at: Option<String>,
+}
+
+impl From<crate::likes_repository::LikeStatus> for LikeStatusResponse {
+    fn from(value: crate::likes_repository::LikeStatus) -> Self {
+        Self {
+            liked: value.exists,
+            liked_at: value.liked_at,
         }
     }
 }

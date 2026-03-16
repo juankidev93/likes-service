@@ -10,7 +10,7 @@ mod use_cases;
 use axum::{middleware, routing::{delete, get, post}, Json, Router};
 use app_state::AppState;
 use config::ServiceConfig;
-use http::{create_like, delete_like};
+use http::{create_like, delete_like, get_like_status};
 use logging::{init_tracing, request_logging_middleware};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -41,6 +41,10 @@ async fn main() {
         .route("/health/live", get(live_health))
         .route("/v1/likes", post(create_like))
         .route("/v1/likes/{content_type}/{content_id}", delete(delete_like))
+        .route(
+            "/v1/likes/{content_type}/{content_id}/status",
+            get(get_like_status),
+        )
         .with_state(app_state)
         .layer(middleware::from_fn(request_logging_middleware));
 

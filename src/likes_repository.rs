@@ -72,24 +72,29 @@ impl<'a> PostgresLikesRepository<'a> {
         content_type: &ContentType,
         content_id: &ContentId,
     ) -> Result<LikeStatus, AppError> {
-        let exists = sqlx::query_scalar::<_, bool>(
+        let liked_at = sqlx::query_scalar::<_, String>(
             r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM likes
-                WHERE user_id = $1
-                  AND content_type = $2
-                  AND content_id = $3
+            SELECT to_char(
+                liked_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
             )
+            FROM likes
+            WHERE user_id = $1
+              AND content_type = $2
+              AND content_id = $3
+            LIMIT 1
             "#,
         )
         .bind(user_id.to_string())
         .bind(content_type.to_string())
         .bind(content_id.to_string())
-        .fetch_one(self.db_pool)
+        .fetch_optional(self.db_pool)
         .await?;
 
-        Ok(LikeStatus { exists })
+        Ok(LikeStatus {
+            exists: liked_at.is_some(),
+            liked_at,
+        })
     }
 }
 
@@ -108,4 +113,5 @@ pub enum DeleteLikeResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LikeStatus {
     pub exists: bool,
+    pub liked_at: Option<String>,
 }
