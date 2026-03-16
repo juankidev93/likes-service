@@ -9,6 +9,7 @@ mod health;
 mod http;
 mod likes_repository;
 mod logging;
+mod metrics;
 mod mock_content_api;
 mod mock_profile_api;
 mod profile_api_client;
@@ -26,6 +27,7 @@ use http::{
     get_like_statuses_batch, list_user_likes,
 };
 use logging::{init_tracing, request_logging_middleware};
+use metrics::{init_metrics, metrics_handler};
 use mock_content_api::{build_mock_content_store, get_content};
 use mock_profile_api::validate_token;
 use profile_api_client::ProfileApiClient;
@@ -38,6 +40,7 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() {
     init_tracing();
+    init_metrics();
 
     let config = ServiceConfig::from_env().unwrap_or_else(|error| {
         eprintln!("configuration error: {error}");
@@ -144,6 +147,7 @@ async fn main() {
     let app = Router::new()
         .route("/health/live", get(live_health))
         .route("/health/ready", get(ready_health))
+        .route("/metrics", get(metrics_handler))
         .route("/v1/auth/validate", get(validate_token))
         .route("/v1/{content_type}/{content_id}", get(get_content))
         .route("/v1/likes/batch/counts", post(get_like_counts_batch))

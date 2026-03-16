@@ -4,6 +4,7 @@ use crate::error::AppError;
 use crate::likes_repository::{LikesCursor, PostgresLikesRepository, UserLikeRow};
 use crate::profile_api_client::AuthenticatedUser;
 use crate::use_cases::{LikeContentResult, LikesUseCases, UnlikeContentResult};
+use crate::metrics::record_cache_operation;
 use axum::{
     extract::{Extension, Path, Query, State},
     http::StatusCode,
@@ -150,6 +151,7 @@ pub async fn get_like_count(
 
     match get_cached_like_count(&state, &cache_key).await {
         Ok(Some(count)) => {
+            record_cache_operation("get_like_count", "hit");
             return success(Json(LikeCountResponse {
                 content_type: content_type.to_string(),
                 content_id: content_id.to_string(),
@@ -157,8 +159,13 @@ pub async fn get_like_count(
             }))
             .into_response();
         }
-        Ok(None) => {}
-        Err(error) => return error.into_response(),
+        Ok(None) => {
+            record_cache_operation("get_like_count", "miss");
+        }
+        Err(error) => {
+            record_cache_operation("get_like_count", "error");
+            return error.into_response();
+        }
     }
 
     match repository.get_like_count(&content_type, &content_id).await {
@@ -268,7 +275,10 @@ pub async fn get_like_counts_batch(
 
     let cached_counts = match get_cached_like_counts(&state, &cache_keys).await {
         Ok(values) => values,
-        Err(error) => return error.into_response(),
+        Err(error) => {
+            record_cache_operation("get_like_counts_batch", "error");
+            return error.into_response();
+        }
     };
 
     let mut counts_by_item: HashMap<(String, String), i64> = HashMap::new();
@@ -278,8 +288,10 @@ pub async fn get_like_counts_batch(
         let key = (content_type.to_string(), content_id.to_string());
 
         if let Some(count) = cached_count {
+            record_cache_operation("get_like_counts_batch", "hit");
             counts_by_item.insert(key, count);
         } else {
+            record_cache_operation("get_like_counts_batch", "miss");
             missing_items.push((content_type.clone(), content_id.clone()));
         }
     }

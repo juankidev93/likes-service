@@ -8,6 +8,8 @@ use std::time::Instant;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::metrics::record_http_request;
+
 const REQUEST_ID_HEADER: &str = "x-request-id";
 
 #[allow(dead_code)]
@@ -40,12 +42,16 @@ pub async fn request_logging_middleware(mut request: Request, next: Next) -> Res
     let start = Instant::now();
     let mut response = next.run(request).await;
     let status = response.status().as_u16();
-    let latency_ms = start.elapsed().as_millis();
+    let elapsed = start.elapsed();
+    let latency_ms = elapsed.as_millis();
+    let latency_seconds = elapsed.as_secs_f64();
 
     response.headers_mut().insert(
         HeaderName::from_static(REQUEST_ID_HEADER),
         HeaderValue::from_str(&request_id).expect("request_id must be a valid header value"),
     );
+
+    record_http_request(&method, &path, status, latency_seconds);
 
     info!(
         method = method,
