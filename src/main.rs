@@ -5,19 +5,22 @@ mod error;
 mod http;
 mod likes_repository;
 mod logging;
+mod mock_profile_api;
 mod use_cases;
 
 use axum::{middleware, routing::{delete, get, post}, Json, Router};
-use app_state::AppState;
+use app_state::{AppState, MockProfile};
 use config::ServiceConfig;
 use http::{
     create_like, delete_like, get_like_count, get_like_counts_batch, get_like_status,
     get_like_statuses_batch, list_user_likes,
 };
 use logging::{init_tracing, request_logging_middleware};
+use mock_profile_api::validate_token;
 use redis::AsyncCommands;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[tokio::main]
@@ -60,13 +63,39 @@ async fn main() {
             std::process::exit(1);
         });
 
+    let mock_profiles = HashMap::from([
+        (
+            "valid-alice-token".to_string(),
+            MockProfile {
+                user_id: "user_alice".to_string(),
+                display_name: "Alice".to_string(),
+            },
+        ),
+        (
+            "valid-bob-token".to_string(),
+            MockProfile {
+                user_id: "user_bob".to_string(),
+                display_name: "Bob".to_string(),
+            },
+        ),
+        (
+            "valid-charlie-token".to_string(),
+            MockProfile {
+                user_id: "user_charlie".to_string(),
+                display_name: "Charlie".to_string(),
+            },
+        ),
+    ]);
+
     let app_state = AppState {
         db_pool,
         redis_client,
+        mock_profiles,
     };
 
     let app = Router::new()
         .route("/health/live", get(live_health))
+        .route("/v1/auth/validate", get(validate_token))
         .route("/v1/likes/user", get(list_user_likes))
         .route("/v1/likes", post(create_like))
         .route("/v1/likes/batch/counts", post(get_like_counts_batch))
