@@ -5,6 +5,7 @@ mod content_validation;
 mod content_registry;
 mod domain;
 mod error;
+mod health;
 mod http;
 mod likes_repository;
 mod logging;
@@ -19,6 +20,7 @@ use auth_middleware::require_auth;
 use config::ServiceConfig;
 use content_validation::ContentValidationClient;
 use content_registry::{ContentApiDefinition, ContentTypeRegistry};
+use health::ready_health;
 use http::{
     create_like, delete_like, get_like_count, get_like_counts_batch, get_like_status,
     get_like_statuses_batch, list_user_likes,
@@ -141,6 +143,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health/live", get(live_health))
+        .route("/health/ready", get(ready_health))
         .route("/v1/auth/validate", get(validate_token))
         .route("/v1/{content_type}/{content_id}", get(get_content))
         .route("/v1/likes/batch/counts", post(get_like_counts_batch))

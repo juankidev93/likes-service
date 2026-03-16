@@ -42,6 +42,23 @@ impl ProfileApiClient {
             ))),
         }
     }
+
+    pub async fn check_availability(&self) -> Result<(), AuthError> {
+        let response = self
+            .http_client
+            .get(format!("{}/v1/auth/validate", self.base_url))
+            .header(header::AUTHORIZATION, "Bearer readiness-check-token")
+            .send()
+            .await
+            .map_err(|error| AuthError::NetworkError(error.to_string()))?;
+
+        match response.status() {
+            StatusCode::OK | StatusCode::UNAUTHORIZED => Ok(()),
+            status => Err(AuthError::DependencyUnavailable(format!(
+                "unexpected profile api status: {status}"
+            ))),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
