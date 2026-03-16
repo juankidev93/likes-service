@@ -9,8 +9,11 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+
+const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;
 
 pub async fn create_like(
     State(state): State<AppState>,
@@ -122,9 +125,24 @@ pub async fn get_like_count(
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
+    let cache_key = like_count_cache_key(&content_type, &content_id);
+
+    match get_cached_like_count(&state, &cache_key).await {
+        Ok(Some(count)) => {
+            return success(Json(LikeCountResponse { count })).into_response();
+        }
+        Ok(None) => {}
+        Err(error) => return internal_error(error).into_response(),
+    }
 
     match repository.get_like_count(&content_type, &content_id).await {
-        Ok(count) => success(Json(LikeCountResponse::from(count))).into_response(),
+        Ok(count) => {
+            if let Err(error) = cache_like_count(&state, &cache_key, count.count).await {
+                return internal_error(error).into_response();
+            }
+
+            success(Json(LikeCountResponse::from(count))).into_response()
+        }
         Err(error) => internal_error(error).into_response(),
     }
 }
@@ -228,4 +246,25 @@ fn internal_error(error: AppError) -> (StatusCode, Json<ErrorResponse>) {
             error: error.to_string(),
         }),
     )
+}
+
+fn like_count_cache_key(content_type: &ContentType, content_id: &ContentId) -> String {
+    format!("likes:count:{content_type}:{content_id}")
+}
+
+async fn get_cached_like_count(
+    state: &AppState,
+    key: &str,
+) -> Result<Option<i64>, AppError> {
+    let mut redis_connection = state.redis_client.get_multiplexed_async_connection().await?;
+    let count = redis_connection.get(key).await?;
+    Ok(count)
+}
+
+async fn cache_like_count(state: &AppState, key: &str, count: i64) -> Result<(), AppError> {
+    let mut redis_connection = state.redis_client.get_multiplexed_async_connection().await?;
+    let _: () = redis_connection
+        .set_ex(key, count, LIKE_COUNT_CACHE_TTL_SECONDS)
+        .await?;
+    Ok(())
 }

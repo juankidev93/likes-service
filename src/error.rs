@@ -31,6 +31,7 @@ impl Error for DomainError {}
 pub enum AppError {
     Domain(DomainError),
     Database(sqlx::Error),
+    Cache(redis::RedisError),
 }
 
 impl fmt::Display for AppError {
@@ -38,6 +39,7 @@ impl fmt::Display for AppError {
         match self {
             Self::Domain(error) => write!(f, "{error}"),
             Self::Database(error) => write!(f, "database error: {error}"),
+            Self::Cache(error) => write!(f, "cache error: {error}"),
         }
     }
 }
@@ -53,5 +55,11 @@ impl From<DomainError> for AppError {
 impl From<sqlx::Error> for AppError {
     fn from(value: sqlx::Error) -> Self {
         Self::Database(value)
+    }
+}
+
+impl From<redis::RedisError> for AppError {
+    fn from(value: redis::RedisError) -> Self {
+        Self::Cache(value)
     }
 }

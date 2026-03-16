@@ -12,6 +12,7 @@ use app_state::AppState;
 use config::ServiceConfig;
 use http::{create_like, delete_like, get_like_count, get_like_status};
 use logging::{init_tracing, request_logging_middleware};
+use redis::AsyncCommands;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
@@ -35,7 +36,31 @@ async fn main() {
             std::process::exit(1);
         });
 
-    let app_state = AppState { db_pool };
+    let redis_client = redis::Client::open(config.redis_url.clone()).unwrap_or_else(|error| {
+        eprintln!("redis configuration error: {error}");
+        std::process::exit(1);
+    });
+
+    let mut redis_connection = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("redis connection error: {error}");
+            std::process::exit(1);
+        });
+
+    let _: String = redis_connection
+        .ping()
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("redis ping error: {error}");
+            std::process::exit(1);
+        });
+
+    let app_state = AppState {
+        db_pool,
+        redis_client,
+    };
 
     let app = Router::new()
         .route("/health/live", get(live_health))
