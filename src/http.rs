@@ -240,7 +240,12 @@ pub async fn list_user_likes(
         })
         .collect();
 
-    success(Json(UserLikesResponse { items, next_cursor })).into_response()
+    success(Json(UserLikesResponse {
+        items,
+        next_cursor,
+        has_more: has_next_page,
+    }))
+    .into_response()
 }
 
 pub async fn get_like_counts_batch(
@@ -312,7 +317,7 @@ pub async fn get_like_counts_batch(
         })
         .collect();
 
-    success(Json(BatchLikeCountsResponse { items })).into_response()
+    success(Json(BatchLikeCountsResponse { results: items })).into_response()
 }
 
 pub async fn get_like_statuses_batch(
@@ -358,7 +363,7 @@ pub async fn get_like_statuses_batch(
         })
         .collect();
 
-    success(Json(BatchLikeStatusesResponse { items })).into_response()
+    success(Json(BatchLikeStatusesResponse { results: items })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -455,7 +460,7 @@ impl LikeCountResponse {
 
 #[derive(Serialize)]
 pub struct BatchLikeCountsResponse {
-    pub items: Vec<BatchLikeCountItemResponse>,
+    pub results: Vec<BatchLikeCountItemResponse>,
 }
 
 #[derive(Serialize)]
@@ -467,7 +472,7 @@ pub struct BatchLikeCountItemResponse {
 
 #[derive(Serialize)]
 pub struct BatchLikeStatusesResponse {
-    pub items: Vec<BatchLikeStatusItemResponse>,
+    pub results: Vec<BatchLikeStatusItemResponse>,
 }
 
 #[derive(Serialize)]
@@ -482,6 +487,7 @@ pub struct BatchLikeStatusItemResponse {
 pub struct UserLikesResponse {
     pub items: Vec<UserLikeItemResponse>,
     pub next_cursor: Option<String>,
+    pub has_more: bool,
 }
 
 #[derive(Serialize)]
