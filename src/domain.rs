@@ -7,14 +7,16 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ContentType {
     Post,
-    Comment,
+    BonusHunter,
+    TopPicks,
 }
 
 impl ContentType {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Post => "post",
-            Self::Comment => "comment",
+            Self::BonusHunter => "bonus_hunter",
+            Self::TopPicks => "top_picks",
         }
     }
 }
@@ -31,7 +33,8 @@ impl FromStr for ContentType {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
             "post" => Ok(Self::Post),
-            "comment" => Ok(Self::Comment),
+            "bonus_hunter" => Ok(Self::BonusHunter),
+            "top_picks" => Ok(Self::TopPicks),
             _ => Err(DomainError::InvalidContentType(value.to_string())),
         }
     }
