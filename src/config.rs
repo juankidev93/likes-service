@@ -6,6 +6,9 @@ pub struct ServiceConfig {
     pub database_url: String,
     pub redis_url: String,
     pub profile_api_base_url: String,
+    pub post_content_api_base_url: String,
+    pub bonus_hunter_content_api_base_url: String,
+    pub top_picks_content_api_base_url: String,
 }
 
 impl ServiceConfig {
@@ -43,12 +46,34 @@ impl ServiceConfig {
             return Err("PROFILE_API_BASE_URL cannot be empty".to_string());
         }
 
+        let post_content_api_base_url = env::var("POST_CONTENT_API_BASE_URL")
+            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
+        let bonus_hunter_content_api_base_url = env::var("BONUS_HUNTER_CONTENT_API_BASE_URL")
+            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
+        let top_picks_content_api_base_url = env::var("TOP_PICKS_CONTENT_API_BASE_URL")
+            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
+
+        if post_content_api_base_url.trim().is_empty() {
+            return Err("POST_CONTENT_API_BASE_URL cannot be empty".to_string());
+        }
+
+        if bonus_hunter_content_api_base_url.trim().is_empty() {
+            return Err("BONUS_HUNTER_CONTENT_API_BASE_URL cannot be empty".to_string());
+        }
+
+        if top_picks_content_api_base_url.trim().is_empty() {
+            return Err("TOP_PICKS_CONTENT_API_BASE_URL cannot be empty".to_string());
+        }
+
         Ok(Self {
             host,
             port,
             database_url,
             redis_url,
             profile_api_base_url,
+            post_content_api_base_url,
+            bonus_hunter_content_api_base_url,
+            top_picks_content_api_base_url,
         })
     }
 

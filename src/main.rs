@@ -1,11 +1,13 @@
 mod app_state;
 mod auth_middleware;
 mod config;
+mod content_registry;
 mod domain;
 mod error;
 mod http;
 mod likes_repository;
 mod logging;
+mod mock_content_api;
 mod mock_profile_api;
 mod profile_api_client;
 mod use_cases;
@@ -14,11 +16,13 @@ use axum::{middleware, routing::{delete, get, post}, Json, Router};
 use app_state::{AppState, MockProfile};
 use auth_middleware::require_auth;
 use config::ServiceConfig;
+use content_registry::{ContentApiDefinition, ContentTypeRegistry};
 use http::{
     create_like, delete_like, get_like_count, get_like_counts_batch, get_like_status,
     get_like_statuses_batch, list_user_likes,
 };
 use logging::{init_tracing, request_logging_middleware};
+use mock_content_api::{build_mock_content_store, get_content};
 use mock_profile_api::validate_token;
 use profile_api_client::ProfileApiClient;
 use redis::AsyncCommands;
@@ -92,11 +96,28 @@ async fn main() {
     ]);
 
     let profile_api_client = ProfileApiClient::new(config.profile_api_base_url.clone());
+    let mock_content_store = build_mock_content_store();
+    let content_type_registry = ContentTypeRegistry::new(vec![
+        ContentApiDefinition {
+            content_type: "post".to_string(),
+            base_url: config.post_content_api_base_url.clone(),
+        },
+        ContentApiDefinition {
+            content_type: "bonus_hunter".to_string(),
+            base_url: config.bonus_hunter_content_api_base_url.clone(),
+        },
+        ContentApiDefinition {
+            content_type: "top_picks".to_string(),
+            base_url: config.top_picks_content_api_base_url.clone(),
+        },
+    ]);
 
     let app_state = AppState {
         db_pool,
         redis_client,
         mock_profiles,
+        mock_content_store,
+        content_type_registry,
         profile_api_client,
     };
 
@@ -117,6 +138,7 @@ async fn main() {
     let app = Router::new()
         .route("/health/live", get(live_health))
         .route("/v1/auth/validate", get(validate_token))
+        .route("/v1/{content_type}/{content_id}", get(get_content))
         .route("/v1/likes/batch/counts", post(get_like_counts_batch))
         .route(
             "/v1/likes/{content_type}/{content_id}/count",

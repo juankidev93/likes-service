@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use crate::content_registry::ContentTypeRegistry;
 use crate::profile_api_client::ProfileApiClient;
 use redis::Client as RedisClient;
 use sqlx::PgPool;
@@ -10,6 +11,8 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub redis_client: RedisClient,
     pub mock_profiles: HashMap<String, MockProfile>,
+    pub mock_content_store: HashMap<String, HashSet<String>>,
+    pub content_type_registry: ContentTypeRegistry,
     pub profile_api_client: ProfileApiClient,
 }
 
