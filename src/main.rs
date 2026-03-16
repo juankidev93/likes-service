@@ -1,4 +1,5 @@
 mod app_state;
+mod auth_middleware;
 mod config;
 mod domain;
 mod error;
@@ -11,6 +12,7 @@ mod use_cases;
 
 use axum::{middleware, routing::{delete, get, post}, Json, Router};
 use app_state::{AppState, MockProfile};
+use auth_middleware::require_auth;
 use config::ServiceConfig;
 use http::{
     create_like, delete_like, get_like_count, get_like_counts_batch, get_like_status,
@@ -18,6 +20,7 @@ use http::{
 };
 use logging::{init_tracing, request_logging_middleware};
 use mock_profile_api::validate_token;
+use profile_api_client::ProfileApiClient;
 use redis::AsyncCommands;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -68,48 +71,58 @@ async fn main() {
         (
             "valid-alice-token".to_string(),
             MockProfile {
-                user_id: "user_alice".to_string(),
+                user_id: "11111111-1111-1111-1111-111111111111".to_string(),
                 display_name: "Alice".to_string(),
             },
         ),
         (
             "valid-bob-token".to_string(),
             MockProfile {
-                user_id: "user_bob".to_string(),
+                user_id: "22222222-2222-2222-2222-222222222222".to_string(),
                 display_name: "Bob".to_string(),
             },
         ),
         (
             "valid-charlie-token".to_string(),
             MockProfile {
-                user_id: "user_charlie".to_string(),
+                user_id: "33333333-3333-3333-3333-333333333333".to_string(),
                 display_name: "Charlie".to_string(),
             },
         ),
     ]);
 
+    let profile_api_client = ProfileApiClient::new(config.profile_api_base_url.clone());
+
     let app_state = AppState {
         db_pool,
         redis_client,
         mock_profiles,
+        profile_api_client,
     };
 
-    let app = Router::new()
-        .route("/health/live", get(live_health))
-        .route("/v1/auth/validate", get(validate_token))
+    let authenticated_routes = Router::new()
         .route("/v1/likes/user", get(list_user_likes))
         .route("/v1/likes", post(create_like))
-        .route("/v1/likes/batch/counts", post(get_like_counts_batch))
         .route("/v1/likes/batch/statuses", post(get_like_statuses_batch))
         .route("/v1/likes/{content_type}/{content_id}", delete(delete_like))
-        .route(
-            "/v1/likes/{content_type}/{content_id}/count",
-            get(get_like_count),
-        )
         .route(
             "/v1/likes/{content_type}/{content_id}/status",
             get(get_like_status),
         )
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            require_auth,
+        ));
+
+    let app = Router::new()
+        .route("/health/live", get(live_health))
+        .route("/v1/auth/validate", get(validate_token))
+        .route("/v1/likes/batch/counts", post(get_like_counts_batch))
+        .route(
+            "/v1/likes/{content_type}/{content_id}/count",
+            get(get_like_count),
+        )
+        .merge(authenticated_routes)
         .with_state(app_state)
         .layer(middleware::from_fn(request_logging_middleware));
 

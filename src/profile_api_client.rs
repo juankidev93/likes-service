@@ -4,6 +4,7 @@ use reqwest::{header, Client, StatusCode};
 use serde::Deserialize;
 use std::{error::Error, fmt};
 
+#[derive(Clone)]
 pub struct ProfileApiClient {
     base_url: String,
     http_client: Client,

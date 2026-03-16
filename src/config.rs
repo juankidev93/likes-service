@@ -5,6 +5,7 @@ pub struct ServiceConfig {
     pub port: u16,
     pub database_url: String,
     pub redis_url: String,
+    pub profile_api_base_url: String,
 }
 
 impl ServiceConfig {
@@ -35,11 +36,19 @@ impl ServiceConfig {
             return Err("REDIS_URL cannot be empty".to_string());
         }
 
+        let profile_api_base_url = env::var("PROFILE_API_BASE_URL")
+            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
+
+        if profile_api_base_url.trim().is_empty() {
+            return Err("PROFILE_API_BASE_URL cannot be empty".to_string());
+        }
+
         Ok(Self {
             host,
             port,
             database_url,
             redis_url,
+            profile_api_base_url,
         })
     }
 

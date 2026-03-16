@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::profile_api_client::ProfileApiClient;
 use redis::Client as RedisClient;
 use sqlx::PgPool;
 
@@ -9,6 +10,7 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub redis_client: RedisClient,
     pub mock_profiles: HashMap<String, MockProfile>,
+    pub profile_api_client: ProfileApiClient,
 }
 
 #[derive(Clone)]

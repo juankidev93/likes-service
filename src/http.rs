@@ -2,10 +2,11 @@ use crate::app_state::AppState;
 use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
 use crate::likes_repository::{LikesCursor, PostgresLikesRepository, UserLikeRow};
+use crate::profile_api_client::AuthenticatedUser;
 use crate::use_cases::{LikeContentResult, LikesUseCases, UnlikeContentResult};
 use axum::{
-    extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    extract::{Extension, Path, Query, State},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
@@ -21,10 +22,10 @@ const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;
 
 pub async fn create_like(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(authenticated_user): Extension<AuthenticatedUser>,
     Json(payload): Json<CreateLikeRequest>,
 ) -> Response {
-    let user_id = match parse_user_id(&headers) {
+    let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
@@ -53,10 +54,10 @@ pub async fn create_like(
 
 pub async fn delete_like(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(authenticated_user): Extension<AuthenticatedUser>,
     Path((content_type, content_id)): Path<(String, String)>,
 ) -> Response {
-    let user_id = match parse_user_id(&headers) {
+    let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
@@ -85,10 +86,10 @@ pub async fn delete_like(
 
 pub async fn get_like_status(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(authenticated_user): Extension<AuthenticatedUser>,
     Path((content_type, content_id)): Path<(String, String)>,
 ) -> Response {
-    let user_id = match parse_user_id(&headers) {
+    let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
@@ -153,10 +154,10 @@ pub async fn get_like_count(
 
 pub async fn list_user_likes(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(authenticated_user): Extension<AuthenticatedUser>,
     Query(query): Query<UserLikesQuery>,
 ) -> Response {
-    let user_id = match parse_user_id(&headers) {
+    let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
@@ -290,14 +291,14 @@ pub async fn get_like_counts_batch(
 
 pub async fn get_like_statuses_batch(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(authenticated_user): Extension<AuthenticatedUser>,
     Json(payload): Json<BatchLikesRequest>,
 ) -> Response {
     if payload.items.len() > MAX_BATCH_ITEMS {
         return bad_request("BATCH_TOO_LARGE".to_string()).into_response();
     }
 
-    let user_id = match parse_user_id(&headers) {
+    let user_id = match parse_authenticated_user_id(&authenticated_user) {
         Ok(value) => value,
         Err(response) => return response.into_response(),
     };
@@ -459,16 +460,12 @@ struct ErrorResponse {
     error: String,
 }
 
-fn parse_user_id(headers: &HeaderMap) -> Result<UserId, (StatusCode, Json<ErrorResponse>)> {
-    let header_value = headers
-        .get("x-user-id")
-        .ok_or_else(|| bad_request("missing x-user-id header".to_string()))?;
-
-    let user_id = header_value
-        .to_str()
-        .map_err(|_| bad_request("x-user-id header must be valid UTF-8".to_string()))?;
-
-    UserId::from_str(user_id).map_err(|error| bad_request(error.to_string()))
+fn parse_authenticated_user_id(
+    authenticated_user: &AuthenticatedUser,
+) -> Result<UserId, (StatusCode, Json<ErrorResponse>)> {
+    UserId::from_str(&authenticated_user.user_id).map_err(|error| {
+        internal_error(AppError::Domain(error))
+    })
 }
 
 fn success<T>(payload: Json<T>) -> (StatusCode, Json<T>) {
