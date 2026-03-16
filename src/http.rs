@@ -36,7 +36,7 @@ pub async fn create_like(
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
-    let use_cases = LikesUseCases::new(repository);
+    let use_cases = LikesUseCases::new(repository, state.redis_client.clone());
 
     match use_cases
         .like_content(&user_id, &content_type, &content_id)
@@ -68,7 +68,7 @@ pub async fn delete_like(
     };
 
     let repository = PostgresLikesRepository::new(&state.db_pool);
-    let use_cases = LikesUseCases::new(repository);
+    let use_cases = LikesUseCases::new(repository, state.redis_client.clone());
 
     match use_cases
         .unlike_content(&user_id, &content_type, &content_id)
