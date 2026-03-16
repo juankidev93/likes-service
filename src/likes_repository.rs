@@ -20,6 +20,8 @@ impl<'a> PostgresLikesRepository<'a> {
         content_type: &ContentType,
         content_id: &ContentId,
     ) -> Result<InsertLikeResult, AppError> {
+        let mut transaction = self.db_pool.begin().await?;
+
         let result = sqlx::query(
             r#"
             INSERT INTO likes (user_id, content_type, content_id)
@@ -30,14 +32,31 @@ impl<'a> PostgresLikesRepository<'a> {
         .bind(user_id.to_string())
         .bind(content_type.to_string())
         .bind(content_id.to_string())
-        .execute(self.db_pool)
+        .execute(&mut *transaction)
         .await?;
 
-        Ok(if result.rows_affected() == 1 {
+        let insert_result = if result.rows_affected() == 1 {
+            sqlx::query(
+                r#"
+                INSERT INTO like_counts (content_type, content_id, like_count)
+                VALUES ($1, $2, 1)
+                ON CONFLICT (content_type, content_id)
+                DO UPDATE SET like_count = like_counts.like_count + 1
+                "#,
+            )
+            .bind(content_type.to_string())
+            .bind(content_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+
             InsertLikeResult::Inserted
         } else {
             InsertLikeResult::AlreadyExists
-        })
+        };
+
+        transaction.commit().await?;
+
+        Ok(insert_result)
     }
 
     pub async fn delete_like(
@@ -46,6 +65,8 @@ impl<'a> PostgresLikesRepository<'a> {
         content_type: &ContentType,
         content_id: &ContentId,
     ) -> Result<DeleteLikeResult, AppError> {
+        let mut transaction = self.db_pool.begin().await?;
+
         let result = sqlx::query(
             r#"
             DELETE FROM likes
@@ -57,14 +78,31 @@ impl<'a> PostgresLikesRepository<'a> {
         .bind(user_id.to_string())
         .bind(content_type.to_string())
         .bind(content_id.to_string())
-        .execute(self.db_pool)
+        .execute(&mut *transaction)
         .await?;
 
-        Ok(if result.rows_affected() == 1 {
+        let delete_result = if result.rows_affected() == 1 {
+            sqlx::query(
+                r#"
+                INSERT INTO like_counts (content_type, content_id, like_count)
+                VALUES ($1, $2, 0)
+                ON CONFLICT (content_type, content_id)
+                DO UPDATE SET like_count = GREATEST(like_counts.like_count - 1, 0)
+                "#,
+            )
+            .bind(content_type.to_string())
+            .bind(content_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+
             DeleteLikeResult::Deleted
         } else {
             DeleteLikeResult::NotFound
-        })
+        };
+
+        transaction.commit().await?;
+
+        Ok(delete_result)
     }
 
     pub async fn get_like_status(
