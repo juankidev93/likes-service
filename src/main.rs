@@ -6,6 +6,7 @@ mod http;
 mod likes_repository;
 mod logging;
 mod mock_profile_api;
+mod profile_api_client;
 mod use_cases;
 
 use axum::{middleware, routing::{delete, get, post}, Json, Router};
