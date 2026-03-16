@@ -107,6 +107,28 @@ pub async fn get_like_status(
     }
 }
 
+pub async fn get_like_count(
+    State(state): State<AppState>,
+    Path((content_type, content_id)): Path<(String, String)>,
+) -> Response {
+    let content_type = match ContentType::from_str(&content_type) {
+        Ok(value) => value,
+        Err(error) => return bad_request(error.to_string()).into_response(),
+    };
+
+    let content_id = match ContentId::from_str(&content_id) {
+        Ok(value) => value,
+        Err(error) => return bad_request(error.to_string()).into_response(),
+    };
+
+    let repository = PostgresLikesRepository::new(&state.db_pool);
+
+    match repository.get_like_count(&content_type, &content_id).await {
+        Ok(count) => success(Json(LikeCountResponse::from(count))).into_response(),
+        Err(error) => internal_error(error).into_response(),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct CreateLikeRequest {
     pub content_type: String,
@@ -157,6 +179,17 @@ impl From<crate::likes_repository::LikeStatus> for LikeStatusResponse {
             liked: value.exists,
             liked_at: value.liked_at,
         }
+    }
+}
+
+#[derive(Serialize)]
+pub struct LikeCountResponse {
+    pub count: i64,
+}
+
+impl From<crate::likes_repository::LikeCount> for LikeCountResponse {
+    fn from(value: crate::likes_repository::LikeCount) -> Self {
+        Self { count: value.count }
     }
 }
 

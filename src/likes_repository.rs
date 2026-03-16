@@ -96,6 +96,29 @@ impl<'a> PostgresLikesRepository<'a> {
             liked_at,
         })
     }
+
+    pub async fn get_like_count(
+        &self,
+        content_type: &ContentType,
+        content_id: &ContentId,
+    ) -> Result<LikeCount, AppError> {
+        let like_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT like_count
+            FROM like_counts
+            WHERE content_type = $1
+              AND content_id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(content_type.to_string())
+        .bind(content_id.to_string())
+        .fetch_optional(self.db_pool)
+        .await?
+        .unwrap_or(0);
+
+        Ok(LikeCount { count: like_count })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,4 +137,9 @@ pub enum DeleteLikeResult {
 pub struct LikeStatus {
     pub exists: bool,
     pub liked_at: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LikeCount {
+    pub count: i64,
 }
