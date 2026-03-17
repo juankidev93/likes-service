@@ -2,22 +2,33 @@
 
 use crate::circuit_breaker::CircuitBreaker;
 use crate::content_registry::ContentTypeRegistry;
-use crate::metrics::record_external_call;
+use crate::metrics::{record_cache_operation, record_external_call};
+use redis::AsyncCommands;
 use reqwest::{Client, StatusCode};
+use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, time::Instant};
 
 #[derive(Clone)]
 pub struct ContentValidationClient {
     registry: ContentTypeRegistry,
     http_client: Client,
+    redis_client: redis::Client,
+    cache_ttl_seconds: u64,
     circuit_breaker: CircuitBreaker,
 }
 
 impl ContentValidationClient {
-    pub fn new(registry: ContentTypeRegistry, circuit_breaker: CircuitBreaker) -> Self {
+    pub fn new(
+        registry: ContentTypeRegistry,
+        redis_client: redis::Client,
+        cache_ttl_seconds: u64,
+        circuit_breaker: CircuitBreaker,
+    ) -> Self {
         Self {
             registry,
             http_client: Client::new(),
+            redis_client,
+            cache_ttl_seconds,
             circuit_breaker,
         }
     }
@@ -27,6 +38,13 @@ impl ContentValidationClient {
         content_type: &str,
         content_id: &str,
     ) -> Result<(), ContentValidationError> {
+        if let Some(cached_result) = self
+            .get_cached_validation_result(content_type, content_id)
+            .await
+        {
+            return cached_result.into_result(content_type, content_id);
+        }
+
         let definition = self
             .registry
             .get(content_type)
@@ -50,11 +68,7 @@ impl ContentValidationClient {
         );
 
         let start = Instant::now();
-        let response = self
-            .http_client
-            .get(url)
-            .send()
-            .await;
+        let response = self.http_client.get(url).send().await;
 
         let response = match response {
             Ok(response) => response,
@@ -81,10 +95,22 @@ impl ContentValidationClient {
         match status {
             StatusCode::OK => {
                 self.circuit_breaker.record_success();
+                self.cache_validation_result(
+                    content_type,
+                    content_id,
+                    CachedValidationResult::Exists,
+                )
+                .await;
                 Ok(())
             }
             StatusCode::NOT_FOUND => {
                 self.circuit_breaker.record_success();
+                self.cache_validation_result(
+                    content_type,
+                    content_id,
+                    CachedValidationResult::NotFound,
+                )
+                .await;
                 Err(ContentValidationError::ContentNotFound {
                     content_type: content_type.to_string(),
                     content_id: content_id.to_string(),
@@ -175,6 +201,108 @@ impl ContentValidationClient {
             )
         }))
     }
+
+    async fn get_cached_validation_result(
+        &self,
+        content_type: &str,
+        content_id: &str,
+    ) -> Option<CachedValidationResult> {
+        let key = content_validation_cache_key(content_type, content_id);
+        let mut redis_connection = match self.redis_client.get_multiplexed_async_connection().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                record_cache_operation("validate_content", "error");
+                tracing::warn!(error = %error, "redis unavailable for content validation cache read");
+                return None;
+            }
+        };
+
+        let cached_value: Option<String> = match redis_connection.get(&key).await {
+            Ok(value) => value,
+            Err(error) => {
+                record_cache_operation("validate_content", "error");
+                tracing::warn!(error = %error, "failed to read content validation cache entry");
+                return None;
+            }
+        };
+
+        match cached_value {
+            Some(payload) => match serde_json::from_str::<CachedValidationResult>(&payload) {
+                Ok(result) => {
+                    record_cache_operation("validate_content", "hit");
+                    Some(result)
+                }
+                Err(error) => {
+                    record_cache_operation("validate_content", "error");
+                    tracing::warn!(error = %error, "failed to decode content validation cache entry");
+                    None
+                }
+            },
+            None => {
+                record_cache_operation("validate_content", "miss");
+                None
+            }
+        }
+    }
+
+    async fn cache_validation_result(
+        &self,
+        content_type: &str,
+        content_id: &str,
+        result: CachedValidationResult,
+    ) {
+        let key = content_validation_cache_key(content_type, content_id);
+        let payload = match serde_json::to_string(&result) {
+            Ok(payload) => payload,
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to serialize content validation cache entry");
+                return;
+            }
+        };
+
+        let mut redis_connection = match self.redis_client.get_multiplexed_async_connection().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                record_cache_operation("validate_content", "error");
+                tracing::warn!(error = %error, "redis unavailable for content validation cache write");
+                return;
+            }
+        };
+
+        if let Err(error) = redis_connection
+            .set_ex::<_, _, ()>(&key, payload, self.cache_ttl_seconds)
+            .await
+        {
+            record_cache_operation("validate_content", "error");
+            tracing::warn!(error = %error, "failed to write content validation cache entry");
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+enum CachedValidationResult {
+    Exists,
+    NotFound,
+}
+
+impl CachedValidationResult {
+    fn into_result(
+        self,
+        content_type: &str,
+        content_id: &str,
+    ) -> Result<(), ContentValidationError> {
+        match self {
+            Self::Exists => Ok(()),
+            Self::NotFound => Err(ContentValidationError::ContentNotFound {
+                content_type: content_type.to_string(),
+                content_id: content_id.to_string(),
+            }),
+        }
+    }
+}
+
+fn content_validation_cache_key(content_type: &str, content_id: &str) -> String {
+    format!("content_validation:{content_type}:{content_id}")
 }
 
 #[derive(Debug, PartialEq, Eq)]

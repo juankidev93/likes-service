@@ -67,6 +67,46 @@ async fn create_like_with_unknown_content_returns_404() {
 
 #[tokio::test]
 #[serial]
+async fn content_validation_results_are_cached() {
+    let server = TestServer::spawn(|_| {}).await;
+    let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
+
+    let metrics_before = fetch_metrics(&server).await;
+    let hits_before = metric_value_or_zero(
+        &metrics_before,
+        "social_api_cache_operations_total",
+        &[("operation", "validate_content"), ("result", "hit")],
+    );
+    let misses_before = metric_value_or_zero(
+        &metrics_before,
+        "social_api_cache_operations_total",
+        &[("operation", "validate_content"), ("result", "miss")],
+    );
+
+    create_like(&server, "valid-alice-token", "post", content_id).await;
+    create_like(&server, "valid-bob-token", "post", content_id).await;
+
+    let metrics_after = fetch_metrics(&server).await;
+    assert!(
+        metric_value_or_zero(
+            &metrics_after,
+            "social_api_cache_operations_total",
+            &[("operation", "validate_content"), ("result", "miss")],
+        ) >= misses_before + 1.0
+    );
+    assert!(
+        metric_value_or_zero(
+            &metrics_after,
+            "social_api_cache_operations_total",
+            &[("operation", "validate_content"), ("result", "hit")],
+        ) >= hits_before + 1.0
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn like_then_count_returns_updated_value() {
     let server = TestServer::spawn(|_| {}).await;
 
@@ -1183,6 +1223,7 @@ fn base_test_config(address: SocketAddr) -> ServiceConfig {
         redis_url: env::var("REDIS_URL").expect("REDIS_URL must be set for tests"),
         write_rate_limit_per_minute: 30,
         read_rate_limit_per_minute: 1000,
+        cache_ttl_content_validation_seconds: 3600,
         circuit_breaker_failure_threshold: 3,
         circuit_breaker_open_seconds: 30,
         circuit_breaker_success_threshold: 3,
@@ -1296,7 +1337,7 @@ async fn cleanup_redis(redis_url: &str) {
         .await
         .expect("test redis connection must work");
 
-    for pattern in ["likes:*", "rate_limit:*"] {
+    for pattern in ["likes:*", "rate_limit:*", "content_validation:*"] {
         let keys: Vec<String> = redis::cmd("KEYS")
             .arg(pattern)
             .query_async(&mut connection)

@@ -128,6 +128,7 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaa
 ## Trade-Offs
 
 - Count reads use Redis as a cache, but fall back to Postgres when Redis is unavailable. This keeps the read path available at the cost of degraded performance.
+- Content validation results are cached in Redis with a bounded TTL. Both `200` and `404` outcomes are cacheable, which reduces repeated dependency calls for hot content IDs.
 - `GET /v1/likes/top` uses persisted totals for `window=all` and hourly preaggregation for `24h`, `7d`, and `30d`. This is simpler and more scalable than aggregating directly from `likes` on every request, while staying easier to review than a more advanced pipeline.
 - `GET /v1/likes/stream` uses Redis Pub/Sub. This makes the stream work across instances that share Redis, without introducing a heavier event system.
 - Circuit breakers and rate limiters are intentionally simple. They provide operational protection and visibility without adding too much state-machine complexity to the codebase.
@@ -136,6 +137,7 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaa
 
 - Leaderboard aggregation is still relatively simple. A higher-scale version would likely use background materialization, retention policies for old buckets, and more explicit indexing and query tuning.
 - Redis Pub/Sub does not provide replay or durable event delivery. It is a good fit for live SSE fanout, but not for event history.
+- Content validation cache entries can be stale for up to the configured TTL. This keeps the service simple and fast, but it means external content removals are not reflected immediately.
 - The project is optimized for clarity and challenge delivery, not for multi-region deployment or very high write throughput.
 
 ## Next Scaling Steps

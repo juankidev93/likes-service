@@ -75,6 +75,8 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
     );
     let content_validation_client = ContentValidationClient::new(
         content_type_registry.clone(),
+        redis_client.clone(),
+        config.cache_ttl_content_validation_seconds,
         content_api_circuit_breaker,
     );
     let shutdown_signal = ShutdownSignal::new();

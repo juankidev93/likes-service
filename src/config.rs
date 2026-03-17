@@ -7,6 +7,7 @@ pub struct ServiceConfig {
     pub redis_url: String,
     pub write_rate_limit_per_minute: u32,
     pub read_rate_limit_per_minute: u32,
+    pub cache_ttl_content_validation_seconds: u64,
     pub circuit_breaker_failure_threshold: u32,
     pub circuit_breaker_open_seconds: u64,
     pub circuit_breaker_success_threshold: u32,
@@ -63,6 +64,16 @@ impl ServiceConfig {
                     )
                 })?,
                 Err(_) => 1000,
+            };
+
+        let cache_ttl_content_validation_seconds =
+            match env::var("CACHE_TTL_CONTENT_VALIDATION_SECONDS") {
+                Ok(value) => value.parse::<u64>().map_err(|_| {
+                    format!(
+                        "CACHE_TTL_CONTENT_VALIDATION_SECONDS must be a valid u64 integer, got '{value}'"
+                    )
+                })?,
+                Err(_) => 3600,
             };
 
         let circuit_breaker_failure_threshold =
@@ -138,6 +149,7 @@ impl ServiceConfig {
             redis_url,
             write_rate_limit_per_minute,
             read_rate_limit_per_minute,
+            cache_ttl_content_validation_seconds,
             circuit_breaker_failure_threshold,
             circuit_breaker_open_seconds,
             circuit_breaker_success_threshold,
