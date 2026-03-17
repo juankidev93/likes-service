@@ -16,25 +16,22 @@ mod profile_api_client;
 mod rate_limit;
 mod use_cases;
 
-use axum::{middleware, routing::{delete, get, post}, Json, Router};
+use axum::{middleware, routing::get, Router};
 use app_state::{AppState, MockProfile};
-use auth_middleware::require_auth;
 use config::ServiceConfig;
 use content_validation::ContentValidationClient;
 use content_registry::{ContentApiDefinition, ContentTypeRegistry};
 use health::ready_health;
 use http::{
-    create_like, delete_like, get_like_count, get_like_counts_batch, get_like_status,
-    get_like_statuses_batch, list_user_likes,
+    build_authenticated_read_routes, build_authenticated_write_routes, build_public_read_routes,
+    live_health,
 };
 use logging::{init_tracing, request_logging_middleware};
 use metrics::{init_metrics, metrics_handler};
 use mock_content_api::{build_mock_content_store, get_content};
 use mock_profile_api::validate_token;
 use profile_api_client::ProfileApiClient;
-use rate_limit::{require_read_rate_limit, require_write_auth_and_rate_limit};
 use redis::AsyncCommands;
-use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -135,36 +132,9 @@ async fn main() {
         profile_api_client,
     };
 
-    let authenticated_write_routes = Router::new()
-        .route("/v1/likes", post(create_like))
-        .route("/v1/likes/{content_type}/{content_id}", delete(delete_like))
-        .route_layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            require_write_auth_and_rate_limit,
-        ));
-
-    let authenticated_read_routes = Router::new()
-        .route("/v1/likes/user", get(list_user_likes))
-        .route("/v1/likes/batch/statuses", post(get_like_statuses_batch))
-        .route(
-            "/v1/likes/{content_type}/{content_id}/status",
-            get(get_like_status),
-        )
-        .route_layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            require_auth,
-        ));
-
-    let public_read_routes = Router::new()
-        .route("/v1/likes/batch/counts", post(get_like_counts_batch))
-        .route(
-            "/v1/likes/{content_type}/{content_id}/count",
-            get(get_like_count),
-        )
-        .route_layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            require_read_rate_limit,
-        ));
+    let authenticated_write_routes = build_authenticated_write_routes(app_state.clone());
+    let authenticated_read_routes = build_authenticated_read_routes(app_state.clone());
+    let public_read_routes = build_public_read_routes(app_state.clone());
 
     let app = Router::new()
         .route("/health/live", get(live_health))
@@ -188,8 +158,4 @@ async fn main() {
     )
         .await
         .expect("HTTP server failed");
-}
-
-async fn live_health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok" }))
 }
