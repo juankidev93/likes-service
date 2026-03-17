@@ -3,7 +3,7 @@ use crate::config::ServiceConfig;
 use crate::health::ready_health;
 use crate::http::{
     build_authenticated_read_routes, build_authenticated_write_routes, build_public_read_routes,
-    live_health,
+    live_health, openapi_spec, swagger_ui,
 };
 use crate::infra::logging::request_logging_middleware;
 use crate::infra::metrics::metrics_handler;
@@ -119,6 +119,8 @@ pub fn build_app(app_state: AppState) -> Router {
     let public_read_routes = build_public_read_routes(app_state.clone());
 
     Router::new()
+        .route("/docs", get(swagger_ui))
+        .route("/openapi.yaml", get(openapi_spec))
         .route("/health/live", get(live_health))
         .route("/health/ready", get(ready_health))
         .route("/metrics", get(metrics_handler))

@@ -3,6 +3,7 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
+COPY openapi.yaml ./
 COPY src ./src
 
 RUN cargo build --release --locked
