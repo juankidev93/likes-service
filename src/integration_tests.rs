@@ -109,6 +109,18 @@ async fn write_rate_limit_returns_429_when_exceeded() {
     })
     .await;
 
+    let metrics_before = fetch_metrics(&server).await;
+    let allowed_before = metric_value_or_zero(
+        &metrics_before,
+        "social_api_rate_limit_allowed_total",
+        &[("scope", "write_user")],
+    );
+    let rejected_before = metric_value_or_zero(
+        &metrics_before,
+        "social_api_rate_limit_rejected_total",
+        &[("scope", "write_user")],
+    );
+
     let first_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
@@ -139,6 +151,22 @@ async fn write_rate_limit_returns_429_when_exceeded() {
 
     let body: Value = second_response.json().await.expect("response must be valid json");
     assert_eq!(body["error"]["code"], "RATE_LIMITED");
+
+    let metrics_after = fetch_metrics(&server).await;
+    assert!(
+        metric_value_or_zero(
+            &metrics_after,
+            "social_api_rate_limit_allowed_total",
+            &[("scope", "write_user")],
+        ) >= allowed_before + 1.0
+    );
+    assert!(
+        metric_value_or_zero(
+            &metrics_after,
+            "social_api_rate_limit_rejected_total",
+            &[("scope", "write_user")],
+        ) >= rejected_before + 1.0
+    );
 
     server.shutdown().await;
 }
@@ -331,6 +359,13 @@ async fn count_falls_back_to_postgres_when_redis_is_unavailable() {
     )
     .await;
 
+    let metrics_before = fetch_metrics(&server).await;
+    let fail_open_before = metric_value_or_zero(
+        &metrics_before,
+        "social_api_rate_limit_fail_open_total",
+        &[("scope", "read_ip")],
+    );
+
     let response = server
         .client
         .get(format!(
@@ -345,6 +380,83 @@ async fn count_falls_back_to_postgres_when_redis_is_unavailable() {
 
     let body: Value = response.json().await.expect("response must be valid json");
     assert_eq!(body["count"], 1);
+
+    let metrics_after = fetch_metrics(&server).await;
+    assert!(
+        metric_value_or_zero(
+            &metrics_after,
+            "social_api_rate_limit_fail_open_total",
+            &[("scope", "read_ip")],
+        ) >= fail_open_before + 1.0
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn read_rate_limit_returns_429_when_exceeded() {
+    let server = TestServer::spawn(|config| {
+        config.read_rate_limit_per_minute = 1;
+    })
+    .await;
+
+    let metrics_before = fetch_metrics(&server).await;
+    let allowed_before = metric_value_or_zero(
+        &metrics_before,
+        "social_api_rate_limit_allowed_total",
+        &[("scope", "read_ip")],
+    );
+    let rejected_before = metric_value_or_zero(
+        &metrics_before,
+        "social_api_rate_limit_rejected_total",
+        &[("scope", "read_ip")],
+    );
+
+    let first_response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/post/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1/count",
+            server.base_url
+        ))
+        .header("x-forwarded-for", "203.0.113.10")
+        .send()
+        .await
+        .expect("first read request must succeed");
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+
+    let second_response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/post/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1/count",
+            server.base_url
+        ))
+        .header("x-forwarded-for", "203.0.113.10")
+        .send()
+        .await
+        .expect("second read request must succeed");
+
+    assert_eq!(second_response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    let body: Value = second_response.json().await.expect("response must be valid json");
+    assert_eq!(body["error"]["code"], "RATE_LIMITED");
+
+    let metrics_after = fetch_metrics(&server).await;
+    assert!(
+        metric_value_or_zero(
+            &metrics_after,
+            "social_api_rate_limit_allowed_total",
+            &[("scope", "read_ip")],
+        ) >= allowed_before + 1.0
+    );
+    assert!(
+        metric_value_or_zero(
+            &metrics_after,
+            "social_api_rate_limit_rejected_total",
+            &[("scope", "read_ip")],
+        ) >= rejected_before + 1.0
+    );
 
     server.shutdown().await;
 }
@@ -620,6 +732,18 @@ async fn create_like(server: &TestServer, token: &str, content_type: &str, conte
     );
 }
 
+async fn fetch_metrics(server: &TestServer) -> String {
+    server
+        .client
+        .get(format!("{}/metrics", server.base_url))
+        .send()
+        .await
+        .expect("metrics request must succeed")
+        .text()
+        .await
+        .expect("metrics body must be readable")
+}
+
 fn metric_value(metrics_body: &str, metric_name: &str, labels: &[(&str, &str)]) -> f64 {
     metrics_body
         .lines()
@@ -638,6 +762,26 @@ fn metric_value(metrics_body: &str, metric_name: &str, labels: &[(&str, &str)]) 
             line.split_whitespace().last()?.parse::<f64>().ok()
         })
         .unwrap_or_else(|| panic!("metric {metric_name} with labels {:?} not found", labels))
+}
+
+fn metric_value_or_zero(metrics_body: &str, metric_name: &str, labels: &[(&str, &str)]) -> f64 {
+    metrics_body
+        .lines()
+        .find_map(|line| {
+            if !line.starts_with(metric_name) {
+                return None;
+            }
+
+            if !labels
+                .iter()
+                .all(|(key, value)| line.contains(&format!("{key}=\"{value}\"")))
+            {
+                return None;
+            }
+
+            line.split_whitespace().last()?.parse::<f64>().ok()
+        })
+        .unwrap_or(0.0)
 }
 
 async fn insert_like_directly(

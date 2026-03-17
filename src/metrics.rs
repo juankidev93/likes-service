@@ -153,6 +153,39 @@ static SSE_DISCONNECTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     .expect("sse disconnects counter must be valid")
 });
 
+static RATE_LIMIT_ALLOWED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_rate_limit_allowed_total",
+            "Total number of requests allowed by the rate limiter",
+        ),
+        &["scope"],
+    )
+    .expect("rate limit allowed counter must be valid")
+});
+
+static RATE_LIMIT_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_rate_limit_rejected_total",
+            "Total number of requests rejected by the rate limiter",
+        ),
+        &["scope"],
+    )
+    .expect("rate limit rejected counter must be valid")
+});
+
+static RATE_LIMIT_FAIL_OPEN_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_rate_limit_fail_open_total",
+            "Total number of requests allowed because the rate limiter failed open",
+        ),
+        &["scope"],
+    )
+    .expect("rate limit fail-open counter must be valid")
+});
+
 pub fn init_metrics() {
     REGISTRY
         .register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
@@ -193,6 +226,15 @@ pub fn init_metrics() {
     REGISTRY
         .register(Box::new(SSE_DISCONNECTS_TOTAL.clone()))
         .expect("sse disconnects counter must register");
+    REGISTRY
+        .register(Box::new(RATE_LIMIT_ALLOWED_TOTAL.clone()))
+        .expect("rate limit allowed counter must register");
+    REGISTRY
+        .register(Box::new(RATE_LIMIT_REJECTED_TOTAL.clone()))
+        .expect("rate limit rejected counter must register");
+    REGISTRY
+        .register(Box::new(RATE_LIMIT_FAIL_OPEN_TOTAL.clone()))
+        .expect("rate limit fail-open counter must register");
 }
 
 pub fn record_http_request(method: &str, path: &str, status: u16, latency_seconds: f64) {
@@ -264,6 +306,18 @@ pub fn record_sse_event_sent(stream: &str, event: &str) {
     SSE_EVENTS_SENT_TOTAL
         .with_label_values(&[stream, event])
         .inc();
+}
+
+pub fn record_rate_limit_allowed(scope: &str) {
+    RATE_LIMIT_ALLOWED_TOTAL.with_label_values(&[scope]).inc();
+}
+
+pub fn record_rate_limit_rejected(scope: &str) {
+    RATE_LIMIT_REJECTED_TOTAL.with_label_values(&[scope]).inc();
+}
+
+pub fn record_rate_limit_fail_open(scope: &str) {
+    RATE_LIMIT_FAIL_OPEN_TOTAL.with_label_values(&[scope]).inc();
 }
 
 pub async fn metrics_handler() -> Response {

@@ -1,6 +1,9 @@
 use crate::app_state::AppState;
 use crate::auth_middleware::authenticate_headers;
 use crate::error::{set_rate_limit_headers, AppError};
+use crate::metrics::{
+    record_rate_limit_allowed, record_rate_limit_fail_open, record_rate_limit_rejected,
+};
 use axum::{
     extract::{ConnectInfo, Request},
     middleware::Next,
@@ -10,6 +13,9 @@ use redis::AsyncCommands;
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
+
+const WRITE_SCOPE: &str = "write_user";
+const READ_SCOPE: &str = "read_ip";
 
 pub async fn require_write_auth_and_rate_limit(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -29,6 +35,7 @@ pub async fn require_write_auth_and_rate_limit(
     let rate_limit_state = match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
         Ok(state) => state,
         Err(error) => {
+            record_rate_limit_fail_open(WRITE_SCOPE);
             warn!(error = %error, "redis unavailable for write rate limiting, allowing request");
             request.extensions_mut().insert(authenticated_user);
             return next.run(request).await;
@@ -38,6 +45,7 @@ pub async fn require_write_auth_and_rate_limit(
     let remaining = limit.saturating_sub(rate_limit_state.current);
 
     if rate_limit_state.current > limit {
+        record_rate_limit_rejected(WRITE_SCOPE);
         return AppError::rate_limited(
             "RATE_LIMITED",
             "rate limit exceeded",
@@ -48,6 +56,7 @@ pub async fn require_write_auth_and_rate_limit(
         );
     }
 
+    record_rate_limit_allowed(WRITE_SCOPE);
     request.extensions_mut().insert(authenticated_user);
     let mut response = next.run(request).await;
     set_rate_limit_headers(
@@ -74,6 +83,7 @@ pub async fn require_read_rate_limit(
     let rate_limit_state = match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
         Ok(state) => state,
         Err(error) => {
+            record_rate_limit_fail_open(READ_SCOPE);
             warn!(error = %error, "redis unavailable for read rate limiting, allowing request");
             return next.run(request).await;
         }
@@ -82,6 +92,7 @@ pub async fn require_read_rate_limit(
     let remaining = limit.saturating_sub(rate_limit_state.current);
 
     if rate_limit_state.current > limit {
+        record_rate_limit_rejected(READ_SCOPE);
         return AppError::rate_limited(
             "RATE_LIMITED",
             "rate limit exceeded",
@@ -92,6 +103,7 @@ pub async fn require_read_rate_limit(
         );
     }
 
+    record_rate_limit_allowed(READ_SCOPE);
     let mut response = next.run(request).await;
     set_rate_limit_headers(
         &mut response,
