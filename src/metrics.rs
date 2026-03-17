@@ -4,7 +4,8 @@ use axum::{
 };
 use once_cell::sync::Lazy;
 use prometheus::{
-    Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry,
+    TextEncoder,
 };
 
 static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
@@ -75,6 +76,39 @@ static LIKES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     .expect("likes total counter must be valid")
 });
 
+static CIRCUIT_BREAKER_OPEN_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_circuit_breaker_open_total",
+            "Total number of circuit breaker openings",
+        ),
+        &["service"],
+    )
+    .expect("circuit breaker open counter must be valid")
+});
+
+static CIRCUIT_BREAKER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_circuit_breaker_rejected_total",
+            "Total number of requests rejected because the circuit breaker is open",
+        ),
+        &["service"],
+    )
+    .expect("circuit breaker rejected counter must be valid")
+});
+
+static CIRCUIT_BREAKER_STATE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    IntGaugeVec::new(
+        Opts::new(
+            "social_api_circuit_breaker_state",
+            "Current circuit breaker state, where 0 is closed and 1 is open",
+        ),
+        &["service"],
+    )
+    .expect("circuit breaker state gauge must be valid")
+});
+
 pub fn init_metrics() {
     REGISTRY
         .register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
@@ -94,6 +128,15 @@ pub fn init_metrics() {
     REGISTRY
         .register(Box::new(LIKES_TOTAL.clone()))
         .expect("likes total counter must register");
+    REGISTRY
+        .register(Box::new(CIRCUIT_BREAKER_OPEN_TOTAL.clone()))
+        .expect("circuit breaker open counter must register");
+    REGISTRY
+        .register(Box::new(CIRCUIT_BREAKER_REJECTED_TOTAL.clone()))
+        .expect("circuit breaker rejected counter must register");
+    REGISTRY
+        .register(Box::new(CIRCUIT_BREAKER_STATE.clone()))
+        .expect("circuit breaker state gauge must register");
 }
 
 pub fn record_http_request(method: &str, path: &str, status: u16, latency_seconds: f64) {
@@ -126,6 +169,25 @@ pub fn record_like_operation(content_type: &str, operation: &str) {
     LIKES_TOTAL
         .with_label_values(&[content_type, operation])
         .inc();
+}
+
+pub fn record_circuit_breaker_open(service: &str) {
+    CIRCUIT_BREAKER_OPEN_TOTAL
+        .with_label_values(&[service])
+        .inc();
+    CIRCUIT_BREAKER_STATE.with_label_values(&[service]).set(1);
+}
+
+pub fn record_circuit_breaker_rejected(service: &str) {
+    CIRCUIT_BREAKER_REJECTED_TOTAL
+        .with_label_values(&[service])
+        .inc();
+}
+
+pub fn set_circuit_breaker_state(service: &str, is_open: bool) {
+    CIRCUIT_BREAKER_STATE
+        .with_label_values(&[service])
+        .set(if is_open { 1 } else { 0 });
 }
 
 pub async fn metrics_handler() -> Response {

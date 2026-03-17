@@ -1,3 +1,6 @@
+use crate::metrics::{
+    record_circuit_breaker_open, record_circuit_breaker_rejected, set_circuit_breaker_state,
+};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -23,6 +26,12 @@ impl CircuitBreaker {
                 consecutive_failures: 0,
             })),
         }
+        .with_initialized_metrics()
+    }
+
+    fn with_initialized_metrics(self) -> Self {
+        set_circuit_breaker_state(self.service_name, false);
+        self
     }
 
     pub fn allow_request(&self) -> Result<(), CircuitBreakerOpenError> {
@@ -40,8 +49,10 @@ impl CircuitBreaker {
                     *state = CircuitBreakerState::Closed {
                         consecutive_failures: 0,
                     };
+                    set_circuit_breaker_state(self.service_name, false);
                     Ok(())
                 } else {
+                    record_circuit_breaker_rejected(self.service_name);
                     Err(CircuitBreakerOpenError {
                         service_name: self.service_name,
                         remaining_open_seconds: self.open_duration.saturating_sub(elapsed).as_secs(),
@@ -60,6 +71,7 @@ impl CircuitBreaker {
         *state = CircuitBreakerState::Closed {
             consecutive_failures: 0,
         };
+        set_circuit_breaker_state(self.service_name, false);
     }
 
     pub fn record_failure(&self) {
@@ -78,6 +90,7 @@ impl CircuitBreaker {
                     *state = CircuitBreakerState::Open {
                         opened_at: Instant::now(),
                     };
+                    record_circuit_breaker_open(self.service_name);
                     tracing::warn!(
                         service = self.service_name,
                         failure_threshold = self.failure_threshold,
