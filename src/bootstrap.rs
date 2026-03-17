@@ -1,5 +1,6 @@
 use crate::app_state::{AppState, MockProfile};
 use crate::config::ServiceConfig;
+use crate::circuit_breaker::CircuitBreaker;
 use crate::content_registry::{ContentApiDefinition, ContentTypeRegistry};
 use crate::content_validation::ContentValidationClient;
 use crate::health::ready_health;
@@ -48,10 +49,26 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
     });
 
     let mock_profiles = build_mock_profiles();
-    let profile_api_client = ProfileApiClient::new(config.profile_api_base_url.clone());
     let mock_content_store = build_mock_content_store();
     let content_type_registry = build_content_type_registry(config);
-    let content_validation_client = ContentValidationClient::new(content_type_registry.clone());
+    let profile_api_circuit_breaker = CircuitBreaker::new(
+        "profile_api",
+        config.circuit_breaker_failure_threshold,
+        Duration::from_secs(config.circuit_breaker_open_seconds),
+    );
+    let content_api_circuit_breaker = CircuitBreaker::new(
+        "content_api",
+        config.circuit_breaker_failure_threshold,
+        Duration::from_secs(config.circuit_breaker_open_seconds),
+    );
+    let profile_api_client = ProfileApiClient::new(
+        config.profile_api_base_url.clone(),
+        profile_api_circuit_breaker,
+    );
+    let content_validation_client = ContentValidationClient::new(
+        content_type_registry.clone(),
+        content_api_circuit_breaker,
+    );
 
     AppState {
         db_pool,

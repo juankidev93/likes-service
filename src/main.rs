@@ -1,6 +1,7 @@
 mod app_state;
 mod auth_middleware;
 mod bootstrap;
+mod circuit_breaker;
 mod config;
 mod content_validation;
 mod content_registry;

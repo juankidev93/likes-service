@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::circuit_breaker::CircuitBreaker;
 use crate::content_registry::ContentTypeRegistry;
 use crate::metrics::record_external_call;
 use reqwest::{Client, StatusCode};
@@ -9,13 +10,15 @@ use std::{error::Error, fmt, time::Instant};
 pub struct ContentValidationClient {
     registry: ContentTypeRegistry,
     http_client: Client,
+    circuit_breaker: CircuitBreaker,
 }
 
 impl ContentValidationClient {
-    pub fn new(registry: ContentTypeRegistry) -> Self {
+    pub fn new(registry: ContentTypeRegistry, circuit_breaker: CircuitBreaker) -> Self {
         Self {
             registry,
             http_client: Client::new(),
+            circuit_breaker,
         }
     }
 
@@ -28,6 +31,16 @@ impl ContentValidationClient {
             .registry
             .get(content_type)
             .ok_or_else(|| ContentValidationError::ContentTypeUnknown(content_type.to_string()))?;
+
+        if let Err(error) = self.circuit_breaker.allow_request() {
+            record_external_call(
+                "content_api",
+                "GET /v1/{content_type}/{content_id}",
+                "circuit_open",
+                0.0,
+            );
+            return Err(ContentValidationError::DependencyUnavailable(error.to_string()));
+        }
 
         let url = format!(
             "{}/v1/{}/{}",
@@ -46,6 +59,7 @@ impl ContentValidationClient {
         let response = match response {
             Ok(response) => response,
             Err(error) => {
+                self.circuit_breaker.record_failure();
                 record_external_call(
                     "content_api",
                     "GET /v1/{content_type}/{content_id}",
@@ -65,14 +79,23 @@ impl ContentValidationClient {
         );
 
         match status {
-            StatusCode::OK => Ok(()),
-            StatusCode::NOT_FOUND => Err(ContentValidationError::ContentNotFound {
-                content_type: content_type.to_string(),
-                content_id: content_id.to_string(),
-            }),
-            status => Err(ContentValidationError::DependencyUnavailable(format!(
-                "unexpected content api status: {status}"
-            ))),
+            StatusCode::OK => {
+                self.circuit_breaker.record_success();
+                Ok(())
+            }
+            StatusCode::NOT_FOUND => {
+                self.circuit_breaker.record_success();
+                Err(ContentValidationError::ContentNotFound {
+                    content_type: content_type.to_string(),
+                    content_id: content_id.to_string(),
+                })
+            }
+            status => {
+                self.circuit_breaker.record_failure();
+                Err(ContentValidationError::DependencyUnavailable(format!(
+                    "unexpected content api status: {status}"
+                )))
+            }
         }
     }
 }

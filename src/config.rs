@@ -7,6 +7,8 @@ pub struct ServiceConfig {
     pub redis_url: String,
     pub write_rate_limit_per_minute: u32,
     pub read_rate_limit_per_minute: u32,
+    pub circuit_breaker_failure_threshold: u32,
+    pub circuit_breaker_open_seconds: u64,
     pub profile_api_base_url: String,
     pub post_content_api_base_url: String,
     pub bonus_hunter_content_api_base_url: String,
@@ -61,6 +63,26 @@ impl ServiceConfig {
                 Err(_) => 1000,
             };
 
+        let circuit_breaker_failure_threshold =
+            match env::var("CIRCUIT_BREAKER_FAILURE_THRESHOLD") {
+                Ok(value) => value.parse::<u32>().map_err(|_| {
+                    format!(
+                        "CIRCUIT_BREAKER_FAILURE_THRESHOLD must be a valid u32 integer, got '{value}'"
+                    )
+                })?,
+                Err(_) => 3,
+            };
+
+        let circuit_breaker_open_seconds =
+            match env::var("CIRCUIT_BREAKER_OPEN_SECONDS") {
+                Ok(value) => value.parse::<u64>().map_err(|_| {
+                    format!(
+                        "CIRCUIT_BREAKER_OPEN_SECONDS must be a valid u64 integer, got '{value}'"
+                    )
+                })?,
+                Err(_) => 30,
+            };
+
         let profile_api_base_url = env::var("PROFILE_API_BASE_URL")
             .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
 
@@ -94,6 +116,8 @@ impl ServiceConfig {
             redis_url,
             write_rate_limit_per_minute,
             read_rate_limit_per_minute,
+            circuit_breaker_failure_threshold,
+            circuit_breaker_open_seconds,
             profile_api_base_url,
             post_content_api_base_url,
             bonus_hunter_content_api_base_url,

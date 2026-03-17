@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::circuit_breaker::CircuitBreaker;
 use crate::metrics::record_external_call;
 use reqwest::{header, Client, StatusCode};
 use serde::Deserialize;
@@ -9,13 +10,15 @@ use std::{error::Error, fmt, time::Instant};
 pub struct ProfileApiClient {
     base_url: String,
     http_client: Client,
+    circuit_breaker: CircuitBreaker,
 }
 
 impl ProfileApiClient {
-    pub fn new(base_url: impl Into<String>) -> Self {
+    pub fn new(base_url: impl Into<String>, circuit_breaker: CircuitBreaker) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             http_client: Client::new(),
+            circuit_breaker,
         }
     }
 
@@ -23,6 +26,11 @@ impl ProfileApiClient {
         &self,
         bearer_token: &str,
     ) -> Result<AuthenticatedUser, AuthError> {
+        if let Err(error) = self.circuit_breaker.allow_request() {
+            record_external_call("profile_api", "GET /v1/auth/validate", "circuit_open", 0.0);
+            return Err(AuthError::DependencyUnavailable(error.to_string()));
+        }
+
         let start = Instant::now();
         let response = self
             .http_client
@@ -34,6 +42,7 @@ impl ProfileApiClient {
         let response = match response {
             Ok(response) => response,
             Err(error) => {
+                self.circuit_breaker.record_failure();
                 record_external_call(
                     "profile_api",
                     "GET /v1/auth/validate",
@@ -53,19 +62,35 @@ impl ProfileApiClient {
         );
 
         match status {
-            StatusCode::OK => response
-                .json::<ValidateTokenResponse>()
-                .await
-                .map(Into::into)
-                .map_err(|error| AuthError::DependencyUnavailable(error.to_string())),
-            StatusCode::UNAUTHORIZED => Err(AuthError::InvalidToken),
-            status => Err(AuthError::DependencyUnavailable(format!(
-                "unexpected profile api status: {status}"
-            ))),
+            StatusCode::OK => match response.json::<ValidateTokenResponse>().await {
+                Ok(payload) => {
+                    self.circuit_breaker.record_success();
+                    Ok(payload.into())
+                }
+                Err(error) => {
+                    self.circuit_breaker.record_failure();
+                    Err(AuthError::DependencyUnavailable(error.to_string()))
+                }
+            },
+            StatusCode::UNAUTHORIZED => {
+                self.circuit_breaker.record_success();
+                Err(AuthError::InvalidToken)
+            }
+            status => {
+                self.circuit_breaker.record_failure();
+                Err(AuthError::DependencyUnavailable(format!(
+                    "unexpected profile api status: {status}"
+                )))
+            }
         }
     }
 
     pub async fn check_availability(&self) -> Result<(), AuthError> {
+        if let Err(error) = self.circuit_breaker.allow_request() {
+            record_external_call("profile_api", "GET /v1/auth/validate", "circuit_open", 0.0);
+            return Err(AuthError::DependencyUnavailable(error.to_string()));
+        }
+
         let start = Instant::now();
         let response = self
             .http_client
@@ -77,6 +102,7 @@ impl ProfileApiClient {
         let response = match response {
             Ok(response) => response,
             Err(error) => {
+                self.circuit_breaker.record_failure();
                 record_external_call(
                     "profile_api",
                     "GET /v1/auth/validate",
@@ -96,10 +122,16 @@ impl ProfileApiClient {
         );
 
         match status {
-            StatusCode::OK | StatusCode::UNAUTHORIZED => Ok(()),
-            status => Err(AuthError::DependencyUnavailable(format!(
-                "unexpected profile api status: {status}"
-            ))),
+            StatusCode::OK | StatusCode::UNAUTHORIZED => {
+                self.circuit_breaker.record_success();
+                Ok(())
+            }
+            status => {
+                self.circuit_breaker.record_failure();
+                Err(AuthError::DependencyUnavailable(format!(
+                    "unexpected profile api status: {status}"
+                )))
+            }
         }
     }
 }
