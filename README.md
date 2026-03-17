@@ -80,6 +80,29 @@ REDIS_URL=redis://127.0.0.1:6379/ \
 cargo test -- --test-threads=1
 ```
 
+For optional load testing with `k6`:
+
+```bash
+k6 run k6/load-test.js
+```
+
+Useful overrides:
+
+```bash
+BASE_URL=http://127.0.0.1:3000 \
+READ_RATE=500 \
+BATCH_RATE=50 \
+WRITE_RATE=20 \
+MIXED_RATE=100 \
+k6 run k6/load-test.js
+```
+
+The script covers:
+- read count hot path
+- batch count hot path
+- write likes
+- a mixed 80/15/5 traffic profile
+
 An OpenAPI specification for the current HTTP contract is available in [openapi.yaml](openapi.yaml).
 Interactive Swagger UI is served by the app at `/docs`, backed by `/openapi.yaml`.
 The spec uses a same-origin server entry, so `/docs` works correctly whether you access the app through `localhost`, `127.0.0.1`, or another host name.
