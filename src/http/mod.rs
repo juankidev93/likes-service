@@ -3,6 +3,7 @@ mod dto;
 mod helpers;
 mod likes;
 mod routes;
+mod top;
 mod user_likes;
 
 pub use routes::{

@@ -1,7 +1,7 @@
 use crate::app_state::AppState;
 use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
-use crate::likes_repository::{LikesCursor, UserLikeRow};
+use crate::likes_repository::{LikesCursor, TopLikesWindow, UserLikeRow};
 use crate::profile_api_client::AuthenticatedUser;
 use axum::{http::StatusCode, Json};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -12,6 +12,8 @@ use super::dto::BatchLikeItemRequest;
 
 const DEFAULT_USER_LIKES_LIMIT: usize = 20;
 pub(super) const MAX_BATCH_ITEMS: usize = 100;
+const DEFAULT_TOP_LIKES_LIMIT: usize = 10;
+const MAX_TOP_LIKES_LIMIT: usize = 50;
 const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;
 
 pub(super) fn parse_authenticated_user_id(
@@ -39,6 +41,23 @@ pub(super) fn parse_limit(limit: Option<usize>) -> Result<usize, AppError> {
     }
 
     Ok(limit)
+}
+
+pub(super) fn parse_top_likes_limit(limit: Option<usize>) -> Result<usize, AppError> {
+    let limit = limit.unwrap_or(DEFAULT_TOP_LIKES_LIMIT);
+
+    if limit == 0 || limit > MAX_TOP_LIKES_LIMIT {
+        return Err(AppError::invalid_request(
+            "INVALID_REQUEST",
+            format!("limit must be between 1 and {MAX_TOP_LIKES_LIMIT}"),
+        ));
+    }
+
+    Ok(limit)
+}
+
+pub(super) fn parse_top_likes_window(window: Option<&str>) -> Result<TopLikesWindow, AppError> {
+    TopLikesWindow::from_str(window.unwrap_or("24h"))
 }
 
 pub(super) fn encode_cursor(row: &UserLikeRow) -> String {

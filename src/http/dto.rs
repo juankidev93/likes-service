@@ -26,6 +26,13 @@ pub(crate) struct UserLikesQuery {
     pub(crate) content_type: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct TopLikesQuery {
+    pub(crate) window: Option<String>,
+    pub(crate) limit: Option<usize>,
+    pub(crate) content_type: Option<String>,
+}
+
 #[derive(Serialize)]
 pub(crate) struct LikeResponse {
     pub(crate) liked: bool,
@@ -135,4 +142,17 @@ pub(crate) struct UserLikeItemResponse {
     pub(crate) content_type: String,
     pub(crate) content_id: String,
     pub(crate) liked_at: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct TopLikesResponse {
+    pub(crate) window: String,
+    pub(crate) results: Vec<TopLikeItemResponse>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct TopLikeItemResponse {
+    pub(crate) content_type: String,
+    pub(crate) content_id: String,
+    pub(crate) count: i64,
 }

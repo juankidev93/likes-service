@@ -10,6 +10,7 @@ use serde_json::json;
 
 use super::batch::{get_like_counts_batch, get_like_statuses_batch};
 use super::likes::{create_like, delete_like, get_like_count, get_like_status};
+use super::top::get_top_likes;
 use super::user_likes::list_user_likes;
 
 pub fn build_authenticated_write_routes(state: AppState) -> Router<AppState> {
@@ -35,6 +36,7 @@ pub fn build_authenticated_read_routes(state: AppState) -> Router<AppState> {
 
 pub fn build_public_read_routes(state: AppState) -> Router<AppState> {
     Router::new()
+        .route("/v1/likes/top", get(get_top_likes))
         .route("/v1/likes/batch/counts", post(get_like_counts_batch))
         .route(
             "/v1/likes/{content_type}/{content_id}/count",

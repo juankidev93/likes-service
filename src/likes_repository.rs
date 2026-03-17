@@ -3,7 +3,7 @@
 use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
 use sqlx::PgPool;
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 pub struct PostgresLikesRepository<'a> {
     db_pool: &'a PgPool,
@@ -346,6 +346,39 @@ impl<'a> PostgresLikesRepository<'a> {
             })
             .collect())
     }
+
+    pub async fn list_top_likes(
+        &self,
+        content_type: Option<&ContentType>,
+        window: &TopLikesWindow,
+        limit: usize,
+    ) -> Result<Vec<TopLikeRow>, AppError> {
+        let rows: Vec<(String, String, i64)> = sqlx::query_as(
+            r#"
+            SELECT content_type, content_id, COUNT(*)::bigint AS like_count
+            FROM likes
+            WHERE ($1::text IS NULL OR content_type = $1)
+              AND ($2::text IS NULL OR liked_at >= NOW() - ($2::interval))
+            GROUP BY content_type, content_id
+            ORDER BY like_count DESC, content_type DESC, content_id DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(content_type.map(ToString::to_string))
+        .bind(window.as_interval())
+        .bind(limit as i64)
+        .fetch_all(self.db_pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(content_type, content_id, like_count)| TopLikeRow {
+                content_type,
+                content_id,
+                like_count,
+            })
+            .collect())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -382,4 +415,56 @@ pub struct UserLikeRow {
     pub content_type: String,
     pub content_id: String,
     pub liked_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TopLikeRow {
+    pub content_type: String,
+    pub content_id: String,
+    pub like_count: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TopLikesWindow {
+    Last24Hours,
+    Last7Days,
+    Last30Days,
+    All,
+}
+
+impl TopLikesWindow {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Last24Hours => "24h",
+            Self::Last7Days => "7d",
+            Self::Last30Days => "30d",
+            Self::All => "all",
+        }
+    }
+
+    fn as_interval(&self) -> Option<&'static str> {
+        match self {
+            Self::Last24Hours => Some("24 hours"),
+            Self::Last7Days => Some("7 days"),
+            Self::Last30Days => Some("30 days"),
+            Self::All => None,
+        }
+    }
+}
+
+impl FromStr for TopLikesWindow {
+    type Err = AppError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "24h" => Ok(Self::Last24Hours),
+            "7d" => Ok(Self::Last7Days),
+            "30d" => Ok(Self::Last30Days),
+            "all" => Ok(Self::All),
+            _ => Err(AppError::invalid_request(
+                "INVALID_REQUEST",
+                "window must be one of: 24h, 7d, 30d, all",
+            )),
+        }
+    }
 }
