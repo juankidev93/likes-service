@@ -20,115 +20,93 @@ pub struct ServiceConfig {
 
 impl ServiceConfig {
     pub fn from_env() -> Result<Self, String> {
-        let host = env::var("SERVICE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = match env::var("SERVICE_PORT") {
-            Ok(value) => value
-                .parse::<u16>()
-                .map_err(|_| format!("SERVICE_PORT must be a valid u16 integer, got '{value}'"))?,
-            Err(_) => 3000,
-        };
+        let host = get_optional_string("SERVICE_HOST", &["HOST"])
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        let port = get_optional_parsed::<u16>("SERVICE_PORT", &["PORT"])?.unwrap_or(3000);
 
         if host.trim().is_empty() {
             return Err("SERVICE_HOST cannot be empty".to_string());
         }
 
-        let database_url = env::var("DATABASE_URL")
-            .map_err(|_| "DATABASE_URL is required".to_string())?;
+        let database_url = get_required_string(
+            "DATABASE_URL",
+            &["WRITE_DATABASE_URL", "READ_DATABASE_URL"],
+        )?;
 
         if database_url.trim().is_empty() {
             return Err("DATABASE_URL cannot be empty".to_string());
         }
 
-        let redis_url = env::var("REDIS_URL")
-            .map_err(|_| "REDIS_URL is required".to_string())?;
+        let redis_url = get_required_string("REDIS_URL", &["CACHE_REDIS_URL"])?;
 
         if redis_url.trim().is_empty() {
             return Err("REDIS_URL cannot be empty".to_string());
         }
 
-        let write_rate_limit_per_minute =
-            match env::var("WRITE_RATE_LIMIT_PER_MINUTE") {
-                Ok(value) => value.parse::<u32>().map_err(|_| {
-                    format!(
-                        "WRITE_RATE_LIMIT_PER_MINUTE must be a valid u32 integer, got '{value}'"
-                    )
-                })?,
-                Err(_) => 30,
-            };
+        let write_rate_limit_per_minute = get_optional_parsed::<u32>(
+            "WRITE_RATE_LIMIT_PER_MINUTE",
+            &["RATE_LIMIT_WRITE_PER_MINUTE"],
+        )?
+        .unwrap_or(30);
 
-        let read_rate_limit_per_minute =
-            match env::var("READ_RATE_LIMIT_PER_MINUTE") {
-                Ok(value) => value.parse::<u32>().map_err(|_| {
-                    format!(
-                        "READ_RATE_LIMIT_PER_MINUTE must be a valid u32 integer, got '{value}'"
-                    )
-                })?,
-                Err(_) => 1000,
-            };
+        let read_rate_limit_per_minute = get_optional_parsed::<u32>(
+            "READ_RATE_LIMIT_PER_MINUTE",
+            &["RATE_LIMIT_READ_PER_MINUTE"],
+        )?
+        .unwrap_or(1000);
 
-        let cache_ttl_content_validation_seconds =
-            match env::var("CACHE_TTL_CONTENT_VALIDATION_SECONDS") {
-                Ok(value) => value.parse::<u64>().map_err(|_| {
-                    format!(
-                        "CACHE_TTL_CONTENT_VALIDATION_SECONDS must be a valid u64 integer, got '{value}'"
-                    )
-                })?,
-                Err(_) => 3600,
-            };
+        let cache_ttl_content_validation_seconds = get_optional_parsed::<u64>(
+            "CACHE_TTL_CONTENT_VALIDATION_SECONDS",
+            &["CONTENT_VALIDATION_CACHE_TTL_SECONDS"],
+        )?
+        .unwrap_or(3600);
 
-        let circuit_breaker_failure_threshold =
-            match env::var("CIRCUIT_BREAKER_FAILURE_THRESHOLD") {
-                Ok(value) => value.parse::<u32>().map_err(|_| {
-                    format!(
-                        "CIRCUIT_BREAKER_FAILURE_THRESHOLD must be a valid u32 integer, got '{value}'"
-                    )
-                })?,
-                Err(_) => 3,
-            };
+        let circuit_breaker_failure_threshold = get_optional_parsed::<u32>(
+            "CIRCUIT_BREAKER_FAILURE_THRESHOLD",
+            &[],
+        )?
+        .unwrap_or(3);
 
-        let circuit_breaker_open_seconds =
-            match env::var("CIRCUIT_BREAKER_OPEN_SECONDS") {
-                Ok(value) => value.parse::<u64>().map_err(|_| {
-                    format!(
-                        "CIRCUIT_BREAKER_OPEN_SECONDS must be a valid u64 integer, got '{value}'"
-                    )
-                })?,
-                Err(_) => 30,
-            };
+        let circuit_breaker_open_seconds = get_optional_parsed::<u64>(
+            "CIRCUIT_BREAKER_OPEN_SECONDS",
+            &[],
+        )?
+        .unwrap_or(30);
 
-        let circuit_breaker_success_threshold =
-            match env::var("CIRCUIT_BREAKER_SUCCESS_THRESHOLD") {
-                Ok(value) => value.parse::<u32>().map_err(|_| {
-                    format!(
-                        "CIRCUIT_BREAKER_SUCCESS_THRESHOLD must be a valid u32 integer, got '{value}'"
-                    )
-                })?,
-                Err(_) => 3,
-            };
+        let circuit_breaker_success_threshold = get_optional_parsed::<u32>(
+            "CIRCUIT_BREAKER_SUCCESS_THRESHOLD",
+            &[],
+        )?
+        .unwrap_or(3);
 
-        let circuit_breaker_failure_window_seconds =
-            match env::var("CIRCUIT_BREAKER_FAILURE_WINDOW_SECONDS") {
-                Ok(value) => value.parse::<u64>().map_err(|_| {
-                    format!(
-                        "CIRCUIT_BREAKER_FAILURE_WINDOW_SECONDS must be a valid u64 integer, got '{value}'"
-                    )
-                })?,
-                Err(_) => 30,
-            };
+        let circuit_breaker_failure_window_seconds = get_optional_parsed::<u64>(
+            "CIRCUIT_BREAKER_FAILURE_WINDOW_SECONDS",
+            &[],
+        )?
+        .unwrap_or(30);
 
-        let profile_api_base_url = env::var("PROFILE_API_BASE_URL")
-            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
+        let profile_api_base_url = get_optional_string("PROFILE_API_BASE_URL", &["PROFILE_API_URL"])
+            .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
 
         if profile_api_base_url.trim().is_empty() {
             return Err("PROFILE_API_BASE_URL cannot be empty".to_string());
         }
 
-        let post_content_api_base_url = env::var("POST_CONTENT_API_BASE_URL")
-            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
-        let bonus_hunter_content_api_base_url = env::var("BONUS_HUNTER_CONTENT_API_BASE_URL")
-            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
-        let top_picks_content_api_base_url = env::var("TOP_PICKS_CONTENT_API_BASE_URL")
-            .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
+        let post_content_api_base_url = get_optional_string(
+            "POST_CONTENT_API_BASE_URL",
+            &["POST_CONTENT_API_URL"],
+        )
+        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
+        let bonus_hunter_content_api_base_url = get_optional_string(
+            "BONUS_HUNTER_CONTENT_API_BASE_URL",
+            &["BONUS_HUNTER_CONTENT_API_URL"],
+        )
+        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
+        let top_picks_content_api_base_url = get_optional_string(
+            "TOP_PICKS_CONTENT_API_BASE_URL",
+            &["TOP_PICKS_CONTENT_API_URL"],
+        )
+        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
 
         if post_content_api_base_url.trim().is_empty() {
             return Err("POST_CONTENT_API_BASE_URL cannot be empty".to_string());
@@ -163,5 +141,31 @@ impl ServiceConfig {
 
     pub fn bind_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+}
+
+fn get_required_string(primary: &str, aliases: &[&str]) -> Result<String, String> {
+    get_optional_string(primary, aliases)
+        .ok_or_else(|| format!("{primary} is required"))
+}
+
+fn get_optional_string(primary: &str, aliases: &[&str]) -> Option<String> {
+    env::var(primary).ok().or_else(|| {
+        aliases
+            .iter()
+            .find_map(|alias| env::var(alias).ok())
+    })
+}
+
+fn get_optional_parsed<T>(primary: &str, aliases: &[&str]) -> Result<Option<T>, String>
+where
+    T: std::str::FromStr,
+{
+    match get_optional_string(primary, aliases) {
+        Some(value) => value
+            .parse::<T>()
+            .map(Some)
+            .map_err(|_| format!("{primary} must be a valid value, got '{value}'")),
+        None => Ok(None),
     }
 }

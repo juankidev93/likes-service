@@ -37,9 +37,12 @@ docker compose up --build
 The Postgres schema is created from the versioned SQL files in `migrations/`.
 The application expects those migrations to be applied before startup and only validates that the required tables exist.
 
+For non-Docker local runs, use `.env.example` as a template for your shell environment.
+The service reads standard environment variables; it does not load `.env` files automatically.
+
 ## Main Environment Variables
 
-The most important variables are:
+Primary variables used by this service:
 
 - `SERVICE_HOST`
 - `SERVICE_PORT`
@@ -47,10 +50,31 @@ The most important variables are:
 - `REDIS_URL`
 - `WRITE_RATE_LIMIT_PER_MINUTE`
 - `READ_RATE_LIMIT_PER_MINUTE`
+- `CACHE_TTL_CONTENT_VALIDATION_SECONDS`
 - `CIRCUIT_BREAKER_FAILURE_THRESHOLD`
 - `CIRCUIT_BREAKER_OPEN_SECONDS`
+- `CIRCUIT_BREAKER_SUCCESS_THRESHOLD`
+- `CIRCUIT_BREAKER_FAILURE_WINDOW_SECONDS`
+- `PROFILE_API_BASE_URL`
+- `POST_CONTENT_API_BASE_URL`
+- `BONUS_HUNTER_CONTENT_API_BASE_URL`
+- `TOP_PICKS_CONTENT_API_BASE_URL`
 
-They are already configured for local development in `docker-compose.yml`.
+They are already configured for local development in `docker-compose.yml`, and `.env.example` mirrors the same setup for host-based runs.
+
+Supported compatibility aliases:
+
+- `HOST` -> `SERVICE_HOST`
+- `PORT` -> `SERVICE_PORT`
+- `WRITE_DATABASE_URL` or `READ_DATABASE_URL` -> `DATABASE_URL`
+- `CACHE_REDIS_URL` -> `REDIS_URL`
+- `RATE_LIMIT_WRITE_PER_MINUTE` -> `WRITE_RATE_LIMIT_PER_MINUTE`
+- `RATE_LIMIT_READ_PER_MINUTE` -> `READ_RATE_LIMIT_PER_MINUTE`
+- `CONTENT_VALIDATION_CACHE_TTL_SECONDS` -> `CACHE_TTL_CONTENT_VALIDATION_SECONDS`
+- `PROFILE_API_URL` -> `PROFILE_API_BASE_URL`
+- `POST_CONTENT_API_URL` -> `POST_CONTENT_API_BASE_URL`
+- `BONUS_HUNTER_CONTENT_API_URL` -> `BONUS_HUNTER_CONTENT_API_BASE_URL`
+- `TOP_PICKS_CONTENT_API_URL` -> `TOP_PICKS_CONTENT_API_BASE_URL`
 
 ## Tests
 
