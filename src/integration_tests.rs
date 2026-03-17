@@ -2,6 +2,7 @@ use crate::bootstrap::{build_app, build_app_state};
 use crate::config::ServiceConfig;
 use crate::logging::init_tracing;
 use crate::metrics::init_metrics;
+use axum::{extract::Path, routing::get, Json, Router};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -278,6 +279,112 @@ async fn content_api_circuit_breaker_opens_and_rejects_following_requests() {
     assert!(metrics_body.contains("service=\"content_api\""));
     assert!(metrics_body.contains("status=\"circuit_open\""));
 
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn profile_api_circuit_breaker_recovers_after_cooldown() {
+    let mock_address = unused_socket_addr();
+    let server = TestServer::spawn(|config| {
+        config.profile_api_base_url = format!("http://{}", mock_address);
+        config.circuit_breaker_failure_threshold = 1;
+        config.circuit_breaker_open_seconds = 1;
+    })
+    .await;
+
+    let first_response = server
+        .client
+        .get(format!("{}/v1/likes/user", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .send()
+        .await
+        .expect("first request must succeed");
+
+    assert_eq!(first_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    sleep(Duration::from_millis(1100)).await;
+
+    let profile_mock = spawn_profile_mock_server(mock_address).await;
+
+    let second_response = server
+        .client
+        .get(format!("{}/v1/likes/user", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .send()
+        .await
+        .expect("second request must succeed");
+
+    assert_eq!(second_response.status(), StatusCode::OK);
+
+    let metrics_body = fetch_metrics(&server).await;
+    assert_eq!(
+        metric_value(
+            &metrics_body,
+            "social_api_circuit_breaker_state",
+            &[("service", "profile_api")],
+        ),
+        0.0
+    );
+
+    profile_mock.shutdown().await;
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn content_api_circuit_breaker_recovers_after_cooldown() {
+    let mock_address = unused_socket_addr();
+    let server = TestServer::spawn(|config| {
+        config.post_content_api_base_url = format!("http://{}", mock_address);
+        config.circuit_breaker_failure_threshold = 1;
+        config.circuit_breaker_open_seconds = 1;
+    })
+    .await;
+
+    let first_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+        }))
+        .send()
+        .await
+        .expect("first request must succeed");
+
+    assert_eq!(first_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    sleep(Duration::from_millis(1100)).await;
+
+    let content_mock = spawn_content_mock_server(mock_address).await;
+
+    let second_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+        }))
+        .send()
+        .await
+        .expect("second request must succeed");
+
+    assert_eq!(second_response.status(), StatusCode::CREATED);
+
+    let metrics_body = fetch_metrics(&server).await;
+    assert_eq!(
+        metric_value(
+            &metrics_body,
+            "social_api_circuit_breaker_state",
+            &[("service", "content_api")],
+        ),
+        0.0
+    );
+
+    content_mock.shutdown().await;
     server.shutdown().await;
 }
 
@@ -711,6 +818,11 @@ struct TestServer {
     redis_url: String,
 }
 
+struct AuxiliaryServer {
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    handle: Option<JoinHandle<()>>,
+}
+
 impl TestServer {
     async fn spawn(override_config: impl FnOnce(&mut ServiceConfig)) -> Self {
         init_test_runtime();
@@ -805,6 +917,20 @@ impl TestServer {
     }
 }
 
+impl AuxiliaryServer {
+    async fn shutdown(mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+
+        if let Some(handle) = self.handle.take() {
+            handle
+                .await
+                .expect("auxiliary server task must finish cleanly");
+        }
+    }
+}
+
 fn init_test_runtime() {
     TEST_INIT.call_once(|| {
         init_tracing();
@@ -826,6 +952,67 @@ fn base_test_config(address: SocketAddr) -> ServiceConfig {
         post_content_api_base_url: format!("http://{}", address),
         bonus_hunter_content_api_base_url: format!("http://{}", address),
         top_picks_content_api_base_url: format!("http://{}", address),
+    }
+}
+
+fn unused_socket_addr() -> SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("temporary listener must bind to discover a free port");
+    let address = listener
+        .local_addr()
+        .expect("temporary listener must expose its address");
+    drop(listener);
+    address
+}
+
+async fn spawn_profile_mock_server(address: SocketAddr) -> AuxiliaryServer {
+    let app = Router::new().route(
+        "/v1/auth/validate",
+        get(|| async {
+            Json(json!({
+                "user_id": "11111111-1111-1111-1111-111111111111",
+                "display_name": "Alice Test"
+            }))
+        }),
+    );
+
+    spawn_auxiliary_server(address, app).await
+}
+
+async fn spawn_content_mock_server(address: SocketAddr) -> AuxiliaryServer {
+    let app = Router::new().route(
+        "/v1/{content_type}/{content_id}",
+        get(|Path((content_type, content_id)): Path<(String, String)>| async move {
+            Json(json!({
+                "content_type": content_type,
+                "content_id": content_id,
+                "exists": true
+            }))
+        }),
+    );
+
+    spawn_auxiliary_server(address, app).await
+}
+
+async fn spawn_auxiliary_server(address: SocketAddr, app: Router) -> AuxiliaryServer {
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
+        .expect("auxiliary listener must bind");
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service())
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .expect("auxiliary server must run");
+    });
+
+    sleep(Duration::from_millis(50)).await;
+
+    AuxiliaryServer {
+        shutdown_tx: Some(shutdown_tx),
+        handle: Some(handle),
     }
 }
 
