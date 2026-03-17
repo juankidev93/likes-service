@@ -82,6 +82,7 @@ cargo test -- --test-threads=1
 
 An OpenAPI specification for the current HTTP contract is available in [openapi.yaml](openapi.yaml).
 Interactive Swagger UI is served by the app at `/docs`, backed by `/openapi.yaml`.
+The spec uses a same-origin server entry, so `/docs` works correctly whether you access the app through `localhost`, `127.0.0.1`, or another host name.
 
 ## Main Endpoints
 

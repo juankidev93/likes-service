@@ -8,7 +8,8 @@ info:
     The SSE endpoint is documented as a `text/event-stream` response with example payloads,
     but OpenAPI is not used here to model the full streaming lifecycle.
 servers:
-  - url: http://localhost:3000
+  - url: /
+    description: Same-origin server
 tags:
   - name: Likes
   - name: Health
