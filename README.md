@@ -178,3 +178,7 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaa
 - Add retention and compaction strategy for old hourly leaderboard buckets.
 - Move health, topology, and trade-off notes into more explicit operational documentation if the service becomes long-lived.
 - Introduce stronger migration tooling beyond Docker init scripts if the service needs a more formal deployment workflow.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
