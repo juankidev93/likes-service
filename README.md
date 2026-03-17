@@ -107,6 +107,12 @@ Get top likes:
 curl -i 'http://127.0.0.1:3000/v1/likes/top?window=all&limit=10'
 ```
 
+Filtered top likes:
+
+```bash
+curl -i 'http://127.0.0.1:3000/v1/likes/top?content_type=post&window=7d&limit=10'
+```
+
 Open the SSE stream:
 
 ```bash

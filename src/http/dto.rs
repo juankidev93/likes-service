@@ -153,7 +153,8 @@ pub(crate) struct UserLikeItemResponse {
 #[derive(Serialize)]
 pub(crate) struct TopLikesResponse {
     pub(crate) window: String,
-    pub(crate) results: Vec<TopLikeItemResponse>,
+    pub(crate) content_type: Option<String>,
+    pub(crate) items: Vec<TopLikeItemResponse>,
 }
 
 #[derive(Serialize)]

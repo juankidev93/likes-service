@@ -37,7 +37,8 @@ pub(crate) async fn build_top_likes_response(
 
     Ok(TopLikesResponse {
         window: window.as_str().to_string(),
-        results: rows.into_iter().map(map_top_like_row).collect(),
+        content_type: content_type.as_ref().map(ToString::to_string),
+        items: rows.into_iter().map(map_top_like_row).collect(),
     })
 }
 

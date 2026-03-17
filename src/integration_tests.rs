@@ -440,18 +440,19 @@ async fn top_likes_returns_items_sorted_by_count() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body: Value = response.json().await.expect("response must be valid json");
-    assert_eq!(body["results"][0]["content_type"], "post");
+    assert!(body["content_type"].is_null());
+    assert_eq!(body["items"][0]["content_type"], "post");
     assert_eq!(
-        body["results"][0]["content_id"],
+        body["items"][0]["content_id"],
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
     );
-    assert_eq!(body["results"][0]["count"], 3);
-    assert_eq!(body["results"][1]["content_type"], "bonus_hunter");
+    assert_eq!(body["items"][0]["count"], 3);
+    assert_eq!(body["items"][1]["content_type"], "bonus_hunter");
     assert_eq!(
-        body["results"][1]["content_id"],
+        body["items"][1]["content_id"],
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1"
     );
-    assert_eq!(body["results"][1]["count"], 2);
+    assert_eq!(body["items"][1]["count"], 2);
 
     server.shutdown().await;
 }
