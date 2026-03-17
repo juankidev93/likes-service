@@ -40,7 +40,17 @@ services:
       SERVICE_HOST: 0.0.0.0
       HTTP_PORT: 3000
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/likes_service
+      READ_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/likes_service
       REDIS_URL: redis://redis:6379/
+      LOG_LEVEL: info
+      DB_MAX_CONNECTIONS: 20
+      DB_MIN_CONNECTIONS: 5
+      DB_ACQUIRE_TIMEOUT_SECS: 5
+      RATE_LIMIT_WRITE_PER_MINUTE: 30
+      RATE_LIMIT_READ_PER_MINUTE: 1000
+      CACHE_TTL_LIKE_COUNTS_SECS: 300
+      CACHE_TTL_CONTENT_VALIDATION_SECS: 3600
+      SSE_HEARTBEAT_INTERVAL_SECS: 15
       PROFILE_API_URL: http://app:3000
       CONTENT_API_POST_URL: http://app:3000
       CONTENT_API_BONUS_HUNTER_URL: http://app:3000

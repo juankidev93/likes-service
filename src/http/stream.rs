@@ -19,7 +19,6 @@ use std::{convert::Infallible, str::FromStr, time::Duration};
 
 use super::dto::LikeEventsStreamQuery;
 
-const HEARTBEAT_INTERVAL_SECONDS: u64 = 15;
 const LIKE_EVENTS_STREAM_NAME: &str = "like_events";
 
 pub(crate) async fn stream_like_events(
@@ -48,7 +47,7 @@ pub(crate) async fn stream_like_events(
         let _connection_guard = SseConnectionGuard::new(LIKE_EVENTS_STREAM_NAME);
         let mut shutdown = state.shutdown_signal.subscribe();
         let mut messages = pubsub.on_message();
-        let mut heartbeat = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(state.sse_heartbeat_interval_seconds));
         heartbeat.tick().await;
 
         loop {

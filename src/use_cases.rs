@@ -9,12 +9,11 @@ use crate::storage::likes_repository::{
 };
 use redis::{AsyncCommands, Client as RedisClient};
 
-const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;
-
 pub struct LikesUseCases<'a> {
     repository: PostgresLikesRepository<'a>,
     redis_client: RedisClient,
     content_validation_client: ContentValidationClient,
+    cache_ttl_like_counts_seconds: u64,
 }
 
 impl<'a> LikesUseCases<'a> {
@@ -22,11 +21,13 @@ impl<'a> LikesUseCases<'a> {
         repository: PostgresLikesRepository<'a>,
         redis_client: RedisClient,
         content_validation_client: ContentValidationClient,
+        cache_ttl_like_counts_seconds: u64,
     ) -> Self {
         Self {
             repository,
             redis_client,
             content_validation_client,
+            cache_ttl_like_counts_seconds,
         }
     }
 
@@ -121,7 +122,9 @@ impl<'a> LikesUseCases<'a> {
 
         if cache_exists {
             let _: i64 = redis_connection.incr(&key, 1).await?;
-            let _: bool = redis_connection.expire(&key, LIKE_COUNT_CACHE_TTL_SECONDS as i64).await?;
+            let _: bool = redis_connection
+                .expire(&key, self.cache_ttl_like_counts_seconds as i64)
+                .await?;
         }
 
         Ok(())
@@ -143,7 +146,9 @@ impl<'a> LikesUseCases<'a> {
                 let _: () = redis_connection.set(&key, 0).await?;
             }
 
-            let _: bool = redis_connection.expire(&key, LIKE_COUNT_CACHE_TTL_SECONDS as i64).await?;
+            let _: bool = redis_connection
+                .expire(&key, self.cache_ttl_like_counts_seconds as i64)
+                .await?;
         }
 
         Ok(())

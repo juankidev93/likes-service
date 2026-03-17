@@ -36,12 +36,19 @@ pub async fn ready_health(State(state): State<AppState>) -> Response {
 }
 
 async fn check_postgres(state: &AppState) -> DependencyCheckResult {
-    match sqlx::query_scalar::<_, i32>("SELECT 1")
+    let write_ok = sqlx::query_scalar::<_, i32>("SELECT 1")
         .fetch_one(&state.db_pool)
         .await
-    {
-        Ok(_) => DependencyCheckResult::ok(),
-        Err(_) => DependencyCheckResult::failed(),
+        .is_ok();
+    let read_ok = sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&state.read_db_pool)
+        .await
+        .is_ok();
+
+    if write_ok && read_ok {
+        DependencyCheckResult::ok()
+    } else {
+        DependencyCheckResult::failed()
     }
 }
 

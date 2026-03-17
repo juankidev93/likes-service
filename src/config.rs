@@ -4,14 +4,20 @@ pub struct ServiceConfig {
     pub host: String,
     pub port: u16,
     pub database_url: String,
+    pub read_database_url: String,
     pub redis_url: String,
+    pub db_max_connections: u32,
+    pub db_min_connections: u32,
+    pub db_acquire_timeout_secs: u64,
     pub write_rate_limit_per_minute: u32,
     pub read_rate_limit_per_minute: u32,
+    pub cache_ttl_like_counts_seconds: u64,
     pub cache_ttl_content_validation_seconds: u64,
     pub circuit_breaker_failure_threshold: u32,
     pub circuit_breaker_open_seconds: u64,
     pub circuit_breaker_success_threshold: u32,
     pub circuit_breaker_failure_window_seconds: u64,
+    pub sse_heartbeat_interval_seconds: u64,
     pub profile_api_base_url: String,
     pub post_content_api_base_url: String,
     pub bonus_hunter_content_api_base_url: String,
@@ -28,9 +34,13 @@ impl ServiceConfig {
         }
 
         let database_url = get_required_string("DATABASE_URL")?;
+        let read_database_url = get_required_string("READ_DATABASE_URL")?;
 
         if database_url.trim().is_empty() {
             return Err("DATABASE_URL cannot be empty".to_string());
+        }
+        if read_database_url.trim().is_empty() {
+            return Err("READ_DATABASE_URL cannot be empty".to_string());
         }
 
         let redis_url = get_required_string("REDIS_URL")?;
@@ -39,11 +49,19 @@ impl ServiceConfig {
             return Err("REDIS_URL cannot be empty".to_string());
         }
 
+        let db_max_connections = get_optional_parsed::<u32>("DB_MAX_CONNECTIONS")?.unwrap_or(20);
+        let db_min_connections = get_optional_parsed::<u32>("DB_MIN_CONNECTIONS")?.unwrap_or(5);
+        let db_acquire_timeout_secs =
+            get_optional_parsed::<u64>("DB_ACQUIRE_TIMEOUT_SECS")?.unwrap_or(5);
+
         let write_rate_limit_per_minute = get_optional_parsed::<u32>("RATE_LIMIT_WRITE_PER_MINUTE")?
         .unwrap_or(30);
 
         let read_rate_limit_per_minute = get_optional_parsed::<u32>("RATE_LIMIT_READ_PER_MINUTE")?
         .unwrap_or(1000);
+
+        let cache_ttl_like_counts_seconds =
+            get_optional_parsed::<u64>("CACHE_TTL_LIKE_COUNTS_SECS")?.unwrap_or(300);
 
         let cache_ttl_content_validation_seconds =
             get_optional_parsed::<u64>("CACHE_TTL_CONTENT_VALIDATION_SECS")?
@@ -60,6 +78,9 @@ impl ServiceConfig {
 
         let circuit_breaker_failure_window_seconds =
             get_optional_parsed::<u64>("CIRCUIT_BREAKER_FAILURE_WINDOW_SECONDS")?.unwrap_or(30);
+
+        let sse_heartbeat_interval_seconds =
+            get_optional_parsed::<u64>("SSE_HEARTBEAT_INTERVAL_SECS")?.unwrap_or(15);
 
         let profile_api_base_url = get_optional_string("PROFILE_API_URL")
             .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
@@ -97,14 +118,20 @@ impl ServiceConfig {
             host,
             port,
             database_url,
+            read_database_url,
             redis_url,
+            db_max_connections,
+            db_min_connections,
+            db_acquire_timeout_secs,
             write_rate_limit_per_minute,
             read_rate_limit_per_minute,
+            cache_ttl_like_counts_seconds,
             cache_ttl_content_validation_seconds,
             circuit_breaker_failure_threshold,
             circuit_breaker_open_seconds,
             circuit_breaker_success_threshold,
             circuit_breaker_failure_window_seconds,
+            sse_heartbeat_interval_seconds,
             profile_api_base_url,
             post_content_api_base_url,
             bonus_hunter_content_api_base_url,

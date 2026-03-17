@@ -30,7 +30,7 @@ pub(crate) async fn build_top_likes_response(
     let limit = parse_top_likes_limit(query.limit)?;
     let content_type = parse_top_likes_content_type(query.content_type.as_deref())?;
 
-    let repository = PostgresLikesRepository::new(&state.db_pool);
+    let repository = PostgresLikesRepository::new(&state.read_db_pool);
     let rows = repository
         .list_top_likes(content_type.as_ref(), &window, limit)
         .await?;

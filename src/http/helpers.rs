@@ -14,7 +14,6 @@ const DEFAULT_USER_LIKES_LIMIT: usize = 20;
 pub(super) const MAX_BATCH_ITEMS: usize = 100;
 const DEFAULT_TOP_LIKES_LIMIT: usize = 10;
 const MAX_TOP_LIKES_LIMIT: usize = 50;
-const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;
 
 pub(super) fn parse_authenticated_user_id(
     authenticated_user: &AuthenticatedUser,
@@ -117,7 +116,7 @@ pub(super) async fn cache_like_count(
 ) -> Result<(), AppError> {
     let mut redis_connection = state.redis_client.get_multiplexed_async_connection().await?;
     let _: () = redis_connection
-        .set_ex(key, count, LIKE_COUNT_CACHE_TTL_SECONDS)
+        .set_ex(key, count, state.cache_ttl_like_counts_seconds)
         .await?;
     Ok(())
 }

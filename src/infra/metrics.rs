@@ -334,13 +334,20 @@ pub fn record_rate_limit_fail_open(scope: &str) {
 }
 
 fn update_db_pool_metrics(state: &AppState) {
-    let total = state.db_pool.size() as i64;
-    let idle = state.db_pool.num_idle() as i64;
-    let active = total.saturating_sub(idle);
+    let write_total = state.db_pool.size() as i64;
+    let write_idle = state.db_pool.num_idle() as i64;
+    let read_total = state.read_db_pool.size() as i64;
+    let read_idle = state.read_db_pool.num_idle() as i64;
 
-    DB_POOL_CONNECTIONS.with_label_values(&["total"]).set(total);
-    DB_POOL_CONNECTIONS.with_label_values(&["idle"]).set(idle);
-    DB_POOL_CONNECTIONS.with_label_values(&["active"]).set(active);
+    DB_POOL_CONNECTIONS
+        .with_label_values(&["total"])
+        .set(write_total + read_total);
+    DB_POOL_CONNECTIONS
+        .with_label_values(&["idle"])
+        .set(write_idle + read_idle);
+    DB_POOL_CONNECTIONS
+        .with_label_values(&["active"])
+        .set(write_total.saturating_sub(write_idle) + read_total.saturating_sub(read_idle));
 }
 
 pub async fn metrics_handler(State(state): State<AppState>) -> Response {

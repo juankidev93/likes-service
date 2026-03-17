@@ -23,8 +23,9 @@ use std::time::Duration;
 
 pub async fn build_app_state(config: &ServiceConfig) -> AppState {
     let db_pool = PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(5))
+        .max_connections(config.db_max_connections)
+        .min_connections(config.db_min_connections)
+        .acquire_timeout(Duration::from_secs(config.db_acquire_timeout_secs))
         .connect(&config.database_url)
         .await
         .unwrap_or_else(|error| {
@@ -32,7 +33,19 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
             std::process::exit(1);
         });
 
+    let read_db_pool = PgPoolOptions::new()
+        .max_connections(config.db_max_connections)
+        .min_connections(config.db_min_connections)
+        .acquire_timeout(Duration::from_secs(config.db_acquire_timeout_secs))
+        .connect(&config.read_database_url)
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("read database connection error: {error}");
+            std::process::exit(1);
+        });
+
     validate_required_schema(&db_pool).await;
+    validate_required_schema(&read_db_pool).await;
 
     let redis_client = redis::Client::open(config.redis_url.clone()).unwrap_or_else(|error| {
         eprintln!("redis configuration error: {error}");
@@ -84,9 +97,12 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
 
     AppState {
         db_pool,
+        read_db_pool,
         redis_client,
+        cache_ttl_like_counts_seconds: config.cache_ttl_like_counts_seconds,
         write_rate_limit_per_minute: config.write_rate_limit_per_minute,
         read_rate_limit_per_minute: config.read_rate_limit_per_minute,
+        sse_heartbeat_interval_seconds: config.sse_heartbeat_interval_seconds,
         mock_profiles,
         mock_content_store,
         content_type_registry,

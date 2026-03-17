@@ -66,7 +66,7 @@ pub(crate) async fn get_like_counts_batch(
     }
 
     if !missing_items.is_empty() {
-        let repository = PostgresLikesRepository::new(&state.db_pool);
+        let repository = PostgresLikesRepository::new(&state.read_db_pool);
         let postgres_counts = match repository.get_like_counts_batch(&missing_items).await {
             Ok(values) => values,
             Err(error) => return error.into_response(),
@@ -125,7 +125,7 @@ pub(crate) async fn get_like_statuses_batch(
         Err(error) => return error.into_response(),
     };
 
-    let repository = PostgresLikesRepository::new(&state.db_pool);
+    let repository = PostgresLikesRepository::new(&state.read_db_pool);
     let statuses = match repository
         .get_like_statuses_batch(&user_id, &parsed_items)
         .await

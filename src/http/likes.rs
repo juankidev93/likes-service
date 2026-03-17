@@ -44,6 +44,7 @@ pub(crate) async fn create_like(
         repository,
         state.redis_client.clone(),
         state.content_validation_client.clone(),
+        state.cache_ttl_like_counts_seconds,
     );
 
     match use_cases
@@ -104,6 +105,7 @@ pub(crate) async fn delete_like(
         repository,
         state.redis_client.clone(),
         state.content_validation_client.clone(),
+        state.cache_ttl_like_counts_seconds,
     );
 
     match use_cases
@@ -152,7 +154,7 @@ pub(crate) async fn get_like_status(
         Err(error) => return AppError::from(error).into_response(),
     };
 
-    let repository = PostgresLikesRepository::new(&state.db_pool);
+    let repository = PostgresLikesRepository::new(&state.read_db_pool);
 
     match repository
         .get_like_status(&user_id, &content_type, &content_id)
@@ -177,7 +179,7 @@ pub(crate) async fn get_like_count(
         Err(error) => return AppError::from(error).into_response(),
     };
 
-    let repository = PostgresLikesRepository::new(&state.db_pool);
+    let repository = PostgresLikesRepository::new(&state.read_db_pool);
     let cache_key = like_count_cache_key(&content_type, &content_id);
 
     match get_cached_like_count(&state, &cache_key).await {

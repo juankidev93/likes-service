@@ -44,7 +44,7 @@ pub(crate) async fn list_user_likes(
         None => None,
     };
 
-    let repository = PostgresLikesRepository::new(&state.db_pool);
+    let repository = PostgresLikesRepository::new(&state.read_db_pool);
     let rows = match repository
         .list_user_likes(&user_id, content_type.as_ref(), cursor.as_ref(), limit + 1)
         .await

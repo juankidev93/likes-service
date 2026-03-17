@@ -12,9 +12,12 @@ use sqlx::PgPool;
 #[derive(Clone)]
 pub struct AppState {
     pub db_pool: PgPool,
+    pub read_db_pool: PgPool,
     pub redis_client: RedisClient,
+    pub cache_ttl_like_counts_seconds: u64,
     pub write_rate_limit_per_minute: u32,
     pub read_rate_limit_per_minute: u32,
+    pub sse_heartbeat_interval_seconds: u64,
     pub mock_profiles: HashMap<String, MockProfile>,
     pub mock_content_store: HashMap<String, HashSet<String>>,
     pub content_type_registry: ContentTypeRegistry,

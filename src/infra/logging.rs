@@ -1,3 +1,4 @@
+use std::env;
 use axum::{
     body::{to_bytes, Body},
     extract::{MatchedPath, Request},
@@ -8,6 +9,7 @@ use axum::{
 use serde_json::Value;
 use std::time::Instant;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 use crate::infra::metrics::record_http_request;
@@ -30,7 +32,17 @@ pub struct ErrorLogContext {
 }
 
 pub fn init_tracing() {
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| {
+            env::var("LOG_LEVEL")
+                .ok()
+                .map(|level| EnvFilter::new(level))
+                .ok_or(())
+        })
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
     tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
         .json()
         .with_current_span(false)
         .with_span_list(false)
