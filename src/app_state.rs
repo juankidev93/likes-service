@@ -4,6 +4,7 @@ use crate::content_validation::ContentValidationClient;
 use crate::content_registry::ContentTypeRegistry;
 use crate::profile_api_client::ProfileApiClient;
 use crate::shutdown::ShutdownSignal;
+use crate::sse_events::LikeEvents;
 use redis::Client as RedisClient;
 use sqlx::PgPool;
 
@@ -20,6 +21,7 @@ pub struct AppState {
     pub content_validation_client: ContentValidationClient,
     pub profile_api_client: ProfileApiClient,
     pub shutdown_signal: ShutdownSignal,
+    pub like_events: LikeEvents,
 }
 
 #[derive(Clone)]

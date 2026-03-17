@@ -51,6 +51,16 @@ pub(crate) async fn create_like(
         .await
     {
         Ok(result) => {
+            if !result.already_existed {
+                state.like_events.publish_like(
+                    &user_id,
+                    &content_type,
+                    &content_id,
+                    result.count,
+                    result.liked_at.as_deref(),
+                );
+            }
+
             let status = if result.already_existed {
                 StatusCode::OK
             } else {
@@ -94,7 +104,18 @@ pub(crate) async fn delete_like(
         .unlike_content(&user_id, &content_type, &content_id)
         .await
     {
-        Ok(result) => success(Json(UnlikeResponse::from(result))).into_response(),
+        Ok(result) => {
+            if result.was_liked {
+                state.like_events.publish_unlike(
+                    &user_id,
+                    &content_type,
+                    &content_id,
+                    result.count,
+                );
+            }
+
+            success(Json(UnlikeResponse::from(result))).into_response()
+        }
         Err(error) => error.into_response(),
     }
 }

@@ -17,6 +17,7 @@ mod mock_profile_api;
 mod profile_api_client;
 mod rate_limit;
 mod shutdown;
+mod sse_events;
 mod use_cases;
 #[cfg(test)]
 mod integration_tests;

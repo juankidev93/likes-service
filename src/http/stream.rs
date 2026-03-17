@@ -1,39 +1,44 @@
 use crate::app_state::AppState;
+use crate::domain::{ContentId, ContentType};
 use crate::error::AppError;
 use crate::metrics::{
     record_sse_connection_close, record_sse_connection_open, record_sse_event_sent,
 };
+use crate::sse_events::current_timestamp;
 use async_stream::stream;
 use axum::{
     extract::{Query, State},
     response::{
-        sse::{Event, KeepAlive, Sse},
+        sse::{Event, Sse},
         IntoResponse, Response,
     },
 };
-use std::{convert::Infallible, time::Duration};
-use std::str::FromStr;
+use serde_json::json;
+use std::{convert::Infallible, str::FromStr, time::Duration};
+use tokio::sync::broadcast::error::RecvError;
 
-use super::dto::TopLikesQuery;
-use super::top::build_top_likes_response;
+use super::dto::LikeEventsStreamQuery;
 
-const STREAM_POLL_INTERVAL_SECONDS: u64 = 5;
-const TOP_LIKES_STREAM_NAME: &str = "top_likes";
+const HEARTBEAT_INTERVAL_SECONDS: u64 = 15;
+const LIKE_EVENTS_STREAM_NAME: &str = "like_events";
 
-pub(crate) async fn stream_top_likes(
+pub(crate) async fn stream_like_events(
     State(state): State<AppState>,
-    Query(query): Query<TopLikesQuery>,
+    Query(query): Query<LikeEventsStreamQuery>,
 ) -> Response {
-    if let Err(error) = validate_stream_query(&query) {
-        return error.into_response();
-    }
+    let (content_type, content_id) = match validate_stream_query(&query) {
+        Ok(values) => values,
+        Err(error) => return error.into_response(),
+    };
 
-    record_sse_connection_open(TOP_LIKES_STREAM_NAME);
+    record_sse_connection_open(LIKE_EVENTS_STREAM_NAME);
 
     let event_stream = stream! {
-        let _connection_guard = SseConnectionGuard::new(TOP_LIKES_STREAM_NAME);
-        let mut interval = tokio::time::interval(Duration::from_secs(STREAM_POLL_INTERVAL_SECONDS));
+        let _connection_guard = SseConnectionGuard::new(LIKE_EVENTS_STREAM_NAME);
         let mut shutdown = state.shutdown_signal.subscribe();
+        let mut receiver = state.like_events.subscribe();
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
+        heartbeat.tick().await;
 
         loop {
             tokio::select! {
@@ -42,61 +47,52 @@ pub(crate) async fn stream_top_likes(
                         break;
                     }
                 }
-                _ = interval.tick() => {}
+                _ = heartbeat.tick() => {
+                    let payload = json!({
+                        "event": "heartbeat",
+                        "timestamp": current_timestamp(),
+                    });
+
+                    record_sse_event_sent(LIKE_EVENTS_STREAM_NAME, "heartbeat");
+                    yield Ok::<Event, Infallible>(Event::default().data(payload.to_string()));
+                }
+                result = receiver.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if event.content_type != content_type.to_string() || event.content_id != content_id.to_string() {
+                                continue;
+                            }
+
+                            let payload = json!({
+                                "event": event.event,
+                                "user_id": event.user_id,
+                                "count": event.count,
+                                "timestamp": event.timestamp,
+                            });
+
+                            let event_name = payload["event"].as_str().unwrap_or("unknown");
+                            record_sse_event_sent(LIKE_EVENTS_STREAM_NAME, event_name);
+                            yield Ok::<Event, Infallible>(Event::default().data(payload.to_string()));
+                        }
+                        Err(RecvError::Lagged(_)) => {
+                            let payload = json!({
+                                "event": "error",
+                                "message": "stream lagged behind",
+                            });
+
+                            record_sse_event_sent(LIKE_EVENTS_STREAM_NAME, "error");
+                            yield Ok::<Event, Infallible>(Event::default().data(payload.to_string()));
+                        }
+                        Err(RecvError::Closed) => {
+                            break;
+                        }
+                    }
+                }
             }
-
-            let response = match build_top_likes_response(&state, query.clone()).await {
-                Ok(response) => response,
-                Err(error) => {
-                    let payload = serde_json::json!({
-                        "error": {
-                            "code": "STREAM_ERROR",
-                            "message": error.to_string(),
-                        }
-                    });
-
-                    record_sse_event_sent(TOP_LIKES_STREAM_NAME, "error");
-                    yield Ok::<Event, Infallible>(
-                        Event::default()
-                            .event("error")
-                            .data(payload.to_string()),
-                    );
-                    continue;
-                }
-            };
-
-            let payload = match serde_json::to_string(&response) {
-                Ok(payload) => payload,
-                Err(error) => {
-                    let payload = serde_json::json!({
-                        "error": {
-                            "code": "STREAM_ERROR",
-                            "message": format!("failed to serialize stream payload: {error}"),
-                        }
-                    });
-
-                    record_sse_event_sent(TOP_LIKES_STREAM_NAME, "error");
-                    yield Ok::<Event, Infallible>(
-                        Event::default()
-                            .event("error")
-                            .data(payload.to_string()),
-                    );
-                    continue;
-                }
-            };
-
-            record_sse_event_sent(TOP_LIKES_STREAM_NAME, "snapshot");
-            yield Ok::<Event, Infallible>(
-                Event::default()
-                    .event("snapshot")
-                    .data(payload),
-            );
         }
     };
 
-    Sse::new(event_stream)
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("keep-alive"))
-        .into_response()
+    Sse::new(event_stream).into_response()
 }
 
 struct SseConnectionGuard {
@@ -115,13 +111,10 @@ impl Drop for SseConnectionGuard {
     }
 }
 
-fn validate_stream_query(query: &TopLikesQuery) -> Result<(), AppError> {
-    super::helpers::parse_top_likes_window(query.window.as_deref())?;
-    super::helpers::parse_top_likes_limit(query.limit)?;
-
-    if let Some(content_type) = query.content_type.as_deref() {
-        let _ = crate::domain::ContentType::from_str(content_type).map_err(AppError::from)?;
-    }
-
-    Ok(())
+fn validate_stream_query(
+    query: &LikeEventsStreamQuery,
+) -> Result<(ContentType, ContentId), AppError> {
+    let content_type = ContentType::from_str(&query.content_type).map_err(AppError::from)?;
+    let content_id = ContentId::from_str(&query.content_id).map_err(AppError::from)?;
+    Ok((content_type, content_id))
 }

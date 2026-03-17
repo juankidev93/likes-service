@@ -110,7 +110,7 @@ curl -i 'http://127.0.0.1:3000/v1/likes/top?window=all&limit=10'
 Open the SSE stream:
 
 ```bash
-curl -N 'http://127.0.0.1:3000/v1/likes/stream?window=all&limit=5'
+curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'
 ```
 
 ## Design Notes
@@ -118,5 +118,6 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?window=all&limit=5'
 - Postgres is the source of truth for `likes` and `like_counts`.
 - Redis is used for count caching and rate limiting.
 - If Redis is unavailable on the read path, the service falls back to Postgres.
-- The leaderboard and stream are intentionally simple in this phase: functional and reviewable, but not optimized for high scale.
+- The leaderboard is intentionally simple in this phase: functional and reviewable, but not optimized for high scale.
+- The SSE endpoint is currently implemented with an in-memory event bus, which is suitable for a single instance but not yet for multi-instance fanout.
 - The service includes internal Profile API and Content API mocks to simplify local development and integration.

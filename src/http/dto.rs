@@ -33,6 +33,12 @@ pub(crate) struct TopLikesQuery {
     pub(crate) content_type: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub(crate) struct LikeEventsStreamQuery {
+    pub(crate) content_type: String,
+    pub(crate) content_id: String,
+}
+
 #[derive(Serialize)]
 pub(crate) struct LikeResponse {
     pub(crate) liked: bool,

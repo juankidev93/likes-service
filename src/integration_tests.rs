@@ -458,35 +458,43 @@ async fn top_likes_returns_items_sorted_by_count() {
 
 #[tokio::test]
 #[serial]
-async fn likes_stream_emits_snapshot_event() {
+async fn likes_stream_emits_like_event() {
     let server = TestServer::spawn(|_| {}).await;
-
-    create_like(
-        &server,
-        "valid-alice-token",
-        "post",
-        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
-    )
-    .await;
-    create_like(
-        &server,
-        "valid-bob-token",
-        "post",
-        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
-    )
-    .await;
+    let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2";
 
     let response = server
         .client
         .get(format!(
-            "{}/v1/likes/stream?window=all&limit=5",
-            server.base_url
+            "{}/v1/likes/stream?content_type=post&content_id={content_id}",
+            server.base_url,
         ))
         .send()
         .await
         .expect("stream request must succeed");
 
     assert_eq!(response.status(), StatusCode::OK);
+
+    let client = server.client.clone();
+    let base_url = server.base_url.clone();
+    let send_like = tokio::spawn(async move {
+        sleep(Duration::from_millis(50)).await;
+        let response = client
+            .post(format!("{base_url}/v1/likes"))
+            .bearer_auth("valid-alice-token")
+            .json(&json!({
+                "content_type": "post",
+                "content_id": content_id
+            }))
+            .send()
+            .await
+            .expect("create like request must succeed");
+
+        assert!(
+            response.status() == StatusCode::CREATED || response.status() == StatusCode::OK,
+            "unexpected like response status: {}",
+            response.status()
+        );
+    });
 
     let first_chunk = tokio::time::timeout(Duration::from_secs(2), async move {
         let mut response = response;
@@ -497,10 +505,77 @@ async fn likes_stream_emits_snapshot_event() {
     .expect("chunk read should succeed")
     .expect("stream should emit at least one chunk");
 
+    send_like
+        .await
+        .expect("like task must finish cleanly");
+
     let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
-    assert!(chunk.contains("event: snapshot"));
-    assert!(chunk.contains("\"window\":\"all\""));
-    assert!(chunk.contains("\"content_type\":\"post\""));
+    assert!(chunk.contains("\"event\":\"like\""));
+    assert!(chunk.contains("\"user_id\":\"11111111-1111-1111-1111-111111111111\""));
+    assert!(chunk.contains("\"count\":1"));
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn likes_stream_emits_unlike_event() {
+    let server = TestServer::spawn(|_| {}).await;
+    let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3";
+
+    create_like(
+        &server,
+        "valid-alice-token",
+        "post",
+        content_id,
+    )
+    .await;
+
+    let response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/stream?content_type=post&content_id={content_id}",
+            server.base_url,
+        ))
+        .send()
+        .await
+        .expect("stream request must succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let client = server.client.clone();
+    let base_url = server.base_url.clone();
+    let send_unlike = tokio::spawn(async move {
+        sleep(Duration::from_millis(50)).await;
+        let response = client
+            .delete(format!(
+                "{base_url}/v1/likes/post/{content_id}"
+            ))
+            .bearer_auth("valid-alice-token")
+            .send()
+            .await
+            .expect("delete request must succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    });
+
+    let first_chunk = tokio::time::timeout(Duration::from_secs(2), async move {
+        let mut response = response;
+        response.chunk().await
+    })
+    .await
+    .expect("stream should emit quickly")
+    .expect("chunk read should succeed")
+    .expect("stream should emit at least one chunk");
+
+    send_unlike
+        .await
+        .expect("unlike task must finish cleanly");
+
+    let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
+    assert!(chunk.contains("\"event\":\"unlike\""));
+    assert!(chunk.contains("\"user_id\":\"11111111-1111-1111-1111-111111111111\""));
+    assert!(chunk.contains("\"count\":0"));
 
     server.shutdown().await;
 }
@@ -627,20 +702,13 @@ async fn read_rate_limit_returns_429_when_exceeded() {
 #[serial]
 async fn sse_metrics_track_connections_and_events() {
     let server = TestServer::spawn(|_| {}).await;
-
-    create_like(
-        &server,
-        "valid-alice-token",
-        "post",
-        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
-    )
-    .await;
+    let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
 
     let response = server
         .client
         .get(format!(
-            "{}/v1/likes/stream?window=all&limit=5",
-            server.base_url
+            "{}/v1/likes/stream?content_type=post&content_id={content_id}",
+            server.base_url,
         ))
         .send()
         .await
@@ -649,6 +717,28 @@ async fn sse_metrics_track_connections_and_events() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let mut response = response;
+    let client = server.client.clone();
+    let base_url = server.base_url.clone();
+    let send_like = tokio::spawn(async move {
+        sleep(Duration::from_millis(50)).await;
+        let response = client
+            .post(format!("{base_url}/v1/likes"))
+            .bearer_auth("valid-alice-token")
+            .json(&json!({
+                "content_type": "post",
+                "content_id": content_id
+            }))
+            .send()
+            .await
+            .expect("create like request must succeed");
+
+        assert!(
+            response.status() == StatusCode::CREATED || response.status() == StatusCode::OK,
+            "unexpected like response status: {}",
+            response.status()
+        );
+    });
+
     let first_chunk = tokio::time::timeout(Duration::from_secs(2), async {
         response.chunk().await
     })
@@ -657,8 +747,12 @@ async fn sse_metrics_track_connections_and_events() {
     .expect("chunk read should succeed")
     .expect("stream should emit at least one chunk");
 
+    send_like
+        .await
+        .expect("like task must finish cleanly");
+
     let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
-    assert!(chunk.contains("event: snapshot"));
+    assert!(chunk.contains("\"event\":\"like\""));
 
     let metrics_while_open = server
         .client
@@ -674,14 +768,14 @@ async fn sse_metrics_track_connections_and_events() {
         metric_value(
             &metrics_while_open,
             "social_api_sse_connections_total",
-            &[("stream", "top_likes")],
+            &[("stream", "like_events")],
         ) >= 1.0
     );
     assert_eq!(
         metric_value(
             &metrics_while_open,
             "social_api_sse_connections_active",
-            &[("stream", "top_likes")],
+            &[("stream", "like_events")],
         ),
         1.0
     );
@@ -689,7 +783,7 @@ async fn sse_metrics_track_connections_and_events() {
         metric_value(
             &metrics_while_open,
             "social_api_sse_events_sent_total",
-            &[("stream", "top_likes"), ("event", "snapshot")],
+            &[("stream", "like_events"), ("event", "like")],
         ) >= 1.0
     );
 
@@ -710,7 +804,7 @@ async fn sse_metrics_track_connections_and_events() {
         metric_value(
             &metrics_after_close,
             "social_api_sse_connections_active",
-            &[("stream", "top_likes")],
+            &[("stream", "like_events")],
         ),
         0.0
     );
@@ -718,7 +812,7 @@ async fn sse_metrics_track_connections_and_events() {
         metric_value(
             &metrics_after_close,
             "social_api_sse_disconnects_total",
-            &[("stream", "top_likes")],
+            &[("stream", "like_events")],
         ) >= 1.0
     );
 
@@ -757,20 +851,13 @@ async fn graceful_shutdown_stops_accepting_new_requests() {
 #[serial]
 async fn graceful_shutdown_closes_sse_connections() {
     let mut server = TestServer::spawn(|_| {}).await;
-
-    create_like(
-        &server,
-        "valid-alice-token",
-        "post",
-        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
-    )
-    .await;
+    let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
 
     let response = server
         .client
         .get(format!(
-            "{}/v1/likes/stream?window=all&limit=5",
-            server.base_url
+            "{}/v1/likes/stream?content_type=post&content_id={content_id}",
+            server.base_url,
         ))
         .send()
         .await
@@ -779,16 +866,6 @@ async fn graceful_shutdown_closes_sse_connections() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let mut response = response;
-    let first_chunk = tokio::time::timeout(Duration::from_secs(2), async {
-        response.chunk().await
-    })
-    .await
-    .expect("stream should emit quickly")
-    .expect("chunk read should succeed")
-    .expect("stream should emit at least one chunk");
-
-    let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
-    assert!(chunk.contains("event: snapshot"));
 
     server.trigger_shutdown();
     server.wait_for_shutdown().await;
