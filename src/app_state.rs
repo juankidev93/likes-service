@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::content_validation::ContentValidationClient;
 use crate::content_registry::ContentTypeRegistry;
 use crate::profile_api_client::ProfileApiClient;
+use crate::shutdown::ShutdownSignal;
 use redis::Client as RedisClient;
 use sqlx::PgPool;
 
@@ -18,6 +19,7 @@ pub struct AppState {
     pub content_type_registry: ContentTypeRegistry,
     pub content_validation_client: ContentValidationClient,
     pub profile_api_client: ProfileApiClient,
+    pub shutdown_signal: ShutdownSignal,
 }
 
 #[derive(Clone)]

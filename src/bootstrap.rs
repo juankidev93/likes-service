@@ -13,6 +13,7 @@ use crate::metrics::metrics_handler;
 use crate::mock_content_api::{build_mock_content_store, get_content};
 use crate::mock_profile_api::validate_token;
 use crate::profile_api_client::ProfileApiClient;
+use crate::shutdown::ShutdownSignal;
 use axum::{middleware, routing::get, Router};
 use redis::AsyncCommands;
 use sqlx::postgres::PgPoolOptions;
@@ -69,6 +70,7 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
         content_type_registry.clone(),
         content_api_circuit_breaker,
     );
+    let shutdown_signal = ShutdownSignal::new();
 
     AppState {
         db_pool,
@@ -80,6 +82,7 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
         content_type_registry,
         content_validation_client,
         profile_api_client,
+        shutdown_signal,
     }
 }
 

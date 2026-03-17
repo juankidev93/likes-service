@@ -33,9 +33,17 @@ pub(crate) async fn stream_top_likes(
     let event_stream = stream! {
         let _connection_guard = SseConnectionGuard::new(TOP_LIKES_STREAM_NAME);
         let mut interval = tokio::time::interval(Duration::from_secs(STREAM_POLL_INTERVAL_SECONDS));
+        let mut shutdown = state.shutdown_signal.subscribe();
 
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = shutdown.changed() => {
+                    if *shutdown.borrow() {
+                        break;
+                    }
+                }
+                _ = interval.tick() => {}
+            }
 
             let response = match build_top_likes_response(&state, query.clone()).await {
                 Ok(response) => response,

@@ -563,11 +563,95 @@ async fn sse_metrics_track_connections_and_events() {
     server.shutdown().await;
 }
 
+#[tokio::test]
+#[serial]
+async fn graceful_shutdown_stops_accepting_new_requests() {
+    let mut server = TestServer::spawn(|_| {}).await;
+
+    let health_response = server
+        .client
+        .get(format!("{}/health/live", server.base_url))
+        .send()
+        .await
+        .expect("health request must succeed before shutdown");
+
+    assert_eq!(health_response.status(), StatusCode::OK);
+
+    server.trigger_shutdown();
+    server.wait_for_shutdown().await;
+
+    let result = server
+        .client
+        .get(format!("{}/health/live", server.base_url))
+        .send()
+        .await;
+
+    assert!(result.is_err(), "server should refuse new connections after shutdown");
+
+    server.cleanup().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn graceful_shutdown_closes_sse_connections() {
+    let mut server = TestServer::spawn(|_| {}).await;
+
+    create_like(
+        &server,
+        "valid-alice-token",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+
+    let response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/stream?window=all&limit=5",
+            server.base_url
+        ))
+        .send()
+        .await
+        .expect("stream request must succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut response = response;
+    let first_chunk = tokio::time::timeout(Duration::from_secs(2), async {
+        response.chunk().await
+    })
+    .await
+    .expect("stream should emit quickly")
+    .expect("chunk read should succeed")
+    .expect("stream should emit at least one chunk");
+
+    let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
+    assert!(chunk.contains("event: snapshot"));
+
+    server.trigger_shutdown();
+    server.wait_for_shutdown().await;
+
+    let next_chunk = tokio::time::timeout(Duration::from_secs(2), async {
+        response.chunk().await
+    })
+    .await
+    .expect("stream should close promptly after shutdown")
+    .expect("chunk read after shutdown should succeed");
+
+    assert!(
+        next_chunk.is_none(),
+        "stream should be closed after graceful shutdown"
+    );
+
+    server.cleanup().await;
+}
+
 struct TestServer {
     base_url: String,
     client: reqwest::Client,
     shutdown_tx: Option<oneshot::Sender<()>>,
-    server_handle: JoinHandle<()>,
+    server_handle: Option<JoinHandle<()>>,
+    shutdown_signal: crate::shutdown::ShutdownSignal,
     database_url: String,
     redis_url: String,
 }
@@ -604,6 +688,7 @@ impl TestServer {
             config.top_picks_content_api_base_url.clone();
 
         let mut app_state = build_app_state(&bootstrap_config).await;
+        let shutdown_signal = app_state.shutdown_signal.clone();
         if config.redis_url != local_redis_url {
             app_state.redis_client = redis::Client::open(config.redis_url.clone())
                 .expect("test redis override must be a valid url");
@@ -629,21 +714,35 @@ impl TestServer {
             base_url,
             client: reqwest::Client::new(),
             shutdown_tx: Some(shutdown_tx),
-            server_handle,
+            server_handle: Some(server_handle),
+            shutdown_signal,
             database_url: config.database_url,
             redis_url: config.redis_url,
         }
     }
 
     async fn shutdown(mut self) {
+        self.trigger_shutdown();
+        self.wait_for_shutdown().await;
+        self.cleanup().await;
+    }
+
+    fn trigger_shutdown(&mut self) {
+        self.shutdown_signal.trigger();
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
             let _ = shutdown_tx.send(());
         }
+    }
 
-        self.server_handle
-            .await
-            .expect("test server task must finish cleanly");
+    async fn wait_for_shutdown(&mut self) {
+        if let Some(server_handle) = self.server_handle.take() {
+            server_handle
+                .await
+                .expect("test server task must finish cleanly");
+        }
+    }
 
+    async fn cleanup(self) {
         cleanup_database(&self.database_url).await;
         if self.redis_url == env::var("REDIS_URL").expect("REDIS_URL must be set for tests") {
             cleanup_redis(&self.redis_url).await;

@@ -16,6 +16,7 @@ mod mock_content_api;
 mod mock_profile_api;
 mod profile_api_client;
 mod rate_limit;
+mod shutdown;
 mod use_cases;
 #[cfg(test)]
 mod integration_tests;
@@ -37,6 +38,7 @@ async fn main() {
     });
 
     let app_state = build_app_state(&config).await;
+    let shutdown_handle = app_state.shutdown_signal.clone();
     let app = build_app(app_state);
 
     let listener = tokio::net::TcpListener::bind(config.bind_address())
@@ -49,14 +51,14 @@ async fn main() {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(shutdown_handle))
         .await
         .expect("HTTP server failed");
 
     tracing::info!("HTTP server stopped");
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(shutdown_handle: crate::shutdown::ShutdownSignal) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
@@ -82,4 +84,6 @@ async fn shutdown_signal() {
             tracing::info!("received SIGTERM, starting graceful shutdown");
         }
     }
+
+    shutdown_handle.trigger();
 }
