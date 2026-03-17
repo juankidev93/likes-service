@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use crate::circuit_breaker::CircuitBreaker;
-use crate::content_registry::ContentTypeRegistry;
-use crate::metrics::{record_cache_operation, record_external_call};
+use crate::infra::metrics::{record_cache_operation, record_external_call};
+use crate::integrations::content_registry::ContentTypeRegistry;
+use crate::resilience::circuit_breaker::CircuitBreaker;
 use redis::AsyncCommands;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};

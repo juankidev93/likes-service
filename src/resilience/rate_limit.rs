@@ -1,8 +1,8 @@
 use crate::app_state::AppState;
 use crate::auth_middleware::authenticate_headers;
 use crate::error::{set_rate_limit_headers, AppError};
-use crate::logging::LoggedUserId;
-use crate::metrics::{
+use crate::infra::logging::LoggedUserId;
+use crate::infra::metrics::{
     record_rate_limit_allowed, record_rate_limit_fail_open, record_rate_limit_rejected,
 };
 use axum::{

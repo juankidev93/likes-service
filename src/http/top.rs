@@ -1,7 +1,7 @@
 use crate::app_state::AppState;
 use crate::domain::ContentType;
 use crate::error::AppError;
-use crate::likes_repository::PostgresLikesRepository;
+use crate::storage::likes_repository::PostgresLikesRepository;
 use axum::{
     extract::{Query, State},
     response::{IntoResponse, Response},
@@ -54,7 +54,7 @@ fn parse_top_likes_content_type(
     }
 }
 
-fn map_top_like_row(row: crate::likes_repository::TopLikeRow) -> TopLikeItemResponse {
+fn map_top_like_row(row: crate::storage::likes_repository::TopLikeRow) -> TopLikeItemResponse {
     TopLikeItemResponse {
         content_type: row.content_type,
         content_id: row.content_id,

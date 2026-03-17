@@ -1,10 +1,10 @@
 use crate::app_state::AppState;
 use crate::domain::{ContentId, ContentType};
 use crate::error::AppError;
-use crate::metrics::{
+use crate::infra::metrics::{
     record_sse_connection_close, record_sse_connection_open, record_sse_event_sent,
 };
-use crate::sse_events::{current_timestamp, LikeEvent};
+use crate::integrations::sse_events::{current_timestamp, LikeEvent};
 use async_stream::stream;
 use axum::{
     extract::{Query, State},

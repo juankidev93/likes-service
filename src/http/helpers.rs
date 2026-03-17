@@ -1,8 +1,8 @@
 use crate::app_state::AppState;
 use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
-use crate::likes_repository::{LikesCursor, TopLikesWindow, UserLikeRow};
-use crate::profile_api_client::AuthenticatedUser;
+use crate::integrations::profile_api_client::AuthenticatedUser;
+use crate::storage::likes_repository::{LikesCursor, TopLikesWindow, UserLikeRow};
 use axum::{http::StatusCode, Json};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use redis::AsyncCommands;

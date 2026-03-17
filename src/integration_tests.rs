@@ -1,7 +1,7 @@
-use crate::bootstrap::{build_app, build_app_state};
 use crate::config::ServiceConfig;
-use crate::logging::init_tracing;
-use crate::metrics::init_metrics;
+use crate::infra::bootstrap::{build_app, build_app_state};
+use crate::infra::logging::init_tracing;
+use crate::infra::metrics::init_metrics;
 use axum::{extract::Path, routing::get, Json, Router};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
@@ -1094,7 +1094,7 @@ struct TestServer {
     client: reqwest::Client,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_handle: Option<JoinHandle<()>>,
-    shutdown_signal: crate::shutdown::ShutdownSignal,
+    shutdown_signal: crate::infra::shutdown::ShutdownSignal,
     database_url: String,
     redis_url: String,
 }

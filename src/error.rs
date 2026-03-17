@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use crate::content_validation::ContentValidationError;
-use crate::logging::ErrorLogContext;
+use crate::infra::logging::ErrorLogContext;
+use crate::integrations::content_validation::ContentValidationError;
 use axum::{
     http::{header::HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},

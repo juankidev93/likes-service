@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 
-use crate::content_validation::ContentValidationClient;
 use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
-use crate::likes_repository::{
+use crate::infra::metrics::record_like_operation;
+use crate::integrations::content_validation::ContentValidationClient;
+use crate::storage::likes_repository::{
     DeleteLikeResult, InsertLikeResult, PostgresLikesRepository,
 };
-use crate::metrics::record_like_operation;
 use redis::{AsyncCommands, Client as RedisClient};
 
 const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;

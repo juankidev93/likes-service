@@ -1,20 +1,20 @@
 use crate::app_state::{AppState, MockProfile};
 use crate::config::ServiceConfig;
-use crate::circuit_breaker::CircuitBreaker;
-use crate::content_registry::{ContentApiDefinition, ContentTypeRegistry};
-use crate::content_validation::ContentValidationClient;
 use crate::health::ready_health;
 use crate::http::{
     build_authenticated_read_routes, build_authenticated_write_routes, build_public_read_routes,
     live_health,
 };
-use crate::logging::request_logging_middleware;
-use crate::metrics::metrics_handler;
+use crate::infra::logging::request_logging_middleware;
+use crate::infra::metrics::metrics_handler;
+use crate::infra::shutdown::ShutdownSignal;
+use crate::integrations::content_registry::{ContentApiDefinition, ContentTypeRegistry};
+use crate::integrations::content_validation::ContentValidationClient;
+use crate::integrations::profile_api_client::ProfileApiClient;
+use crate::integrations::sse_events::LikeEvents;
 use crate::mock_content_api::{build_mock_content_store, get_content};
 use crate::mock_profile_api::validate_token;
-use crate::profile_api_client::ProfileApiClient;
-use crate::shutdown::ShutdownSignal;
-use crate::sse_events::LikeEvents;
+use crate::resilience::circuit_breaker::CircuitBreaker;
 use axum::{middleware, routing::get, Router};
 use redis::AsyncCommands;
 use sqlx::postgres::PgPoolOptions;

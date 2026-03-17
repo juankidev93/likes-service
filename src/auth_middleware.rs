@@ -1,7 +1,7 @@
 use crate::app_state::AppState;
 use crate::error::AppError;
-use crate::logging::LoggedUserId;
-use crate::profile_api_client::{AuthError, AuthenticatedUser};
+use crate::infra::logging::LoggedUserId;
+use crate::integrations::profile_api_client::{AuthError, AuthenticatedUser};
 use axum::{
     extract::Request,
     http::{header, HeaderMap},

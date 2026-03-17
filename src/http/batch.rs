@@ -1,8 +1,8 @@
 use crate::app_state::AppState;
 use crate::error::AppError;
-use crate::likes_repository::PostgresLikesRepository;
-use crate::metrics::record_cache_operation;
-use crate::profile_api_client::AuthenticatedUser;
+use crate::infra::metrics::record_cache_operation;
+use crate::integrations::profile_api_client::AuthenticatedUser;
+use crate::storage::likes_repository::PostgresLikesRepository;
 use axum::{
     extract::{Extension, State},
     response::{IntoResponse, Response},

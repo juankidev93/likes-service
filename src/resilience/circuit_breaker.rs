@@ -1,4 +1,4 @@
-use crate::metrics::{
+use crate::infra::metrics::{
     record_circuit_breaker_open, record_circuit_breaker_rejected, set_circuit_breaker_state,
 };
 use std::collections::VecDeque;

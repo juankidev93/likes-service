@@ -1,31 +1,24 @@
 mod app_state;
 mod auth_middleware;
-mod bootstrap;
-mod circuit_breaker;
 mod config;
-mod content_validation;
-mod content_registry;
 mod domain;
 mod error;
 mod health;
 mod http;
-mod likes_repository;
-mod logging;
-mod metrics;
+mod infra;
+mod integrations;
 mod mock_content_api;
 mod mock_profile_api;
-mod profile_api_client;
-mod rate_limit;
-mod shutdown;
-mod sse_events;
+mod resilience;
+mod storage;
 mod use_cases;
 #[cfg(test)]
 mod integration_tests;
 
-use bootstrap::{build_app, build_app_state};
 use config::ServiceConfig;
-use logging::init_tracing;
-use metrics::init_metrics;
+use infra::bootstrap::{build_app, build_app_state};
+use infra::logging::init_tracing;
+use infra::metrics::init_metrics;
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -59,7 +52,7 @@ async fn main() {
     tracing::info!(service = "likes_service", "HTTP server stopped");
 }
 
-async fn shutdown_signal(shutdown_handle: crate::shutdown::ShutdownSignal) {
+async fn shutdown_signal(shutdown_handle: crate::infra::shutdown::ShutdownSignal) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await

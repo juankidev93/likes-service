@@ -10,7 +10,7 @@ use std::time::Instant;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::metrics::record_http_request;
+use crate::infra::metrics::record_http_request;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const SERVICE_NAME: &str = "likes_service";

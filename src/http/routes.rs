@@ -1,6 +1,6 @@
 use crate::app_state::AppState;
 use crate::auth_middleware::require_auth;
-use crate::rate_limit::{require_read_rate_limit, require_write_auth_and_rate_limit};
+use crate::resilience::rate_limit::{require_read_rate_limit, require_write_auth_and_rate_limit};
 use axum::{
     middleware,
     routing::{delete, get, post},

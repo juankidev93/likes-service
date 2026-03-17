@@ -81,8 +81,8 @@ pub(crate) struct LikeStatusResponse {
     pub(crate) liked_at: Option<String>,
 }
 
-impl From<crate::likes_repository::LikeStatus> for LikeStatusResponse {
-    fn from(value: crate::likes_repository::LikeStatus) -> Self {
+impl From<crate::storage::likes_repository::LikeStatus> for LikeStatusResponse {
+    fn from(value: crate::storage::likes_repository::LikeStatus) -> Self {
         Self {
             liked: value.exists,
             liked_at: value.liked_at,

@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::content_validation::ContentValidationClient;
-use crate::content_registry::ContentTypeRegistry;
-use crate::profile_api_client::ProfileApiClient;
-use crate::shutdown::ShutdownSignal;
-use crate::sse_events::LikeEvents;
+use crate::infra::shutdown::ShutdownSignal;
+use crate::integrations::content_registry::ContentTypeRegistry;
+use crate::integrations::content_validation::ContentValidationClient;
+use crate::integrations::profile_api_client::ProfileApiClient;
+use crate::integrations::sse_events::LikeEvents;
 use redis::Client as RedisClient;
 use sqlx::PgPool;
 

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use crate::circuit_breaker::CircuitBreaker;
-use crate::metrics::record_external_call;
+use crate::infra::metrics::record_external_call;
+use crate::resilience::circuit_breaker::CircuitBreaker;
 use reqwest::{header, Client, StatusCode};
 use serde::Deserialize;
 use std::{error::Error, fmt, time::Instant};
