@@ -54,7 +54,7 @@ They are already configured for local development in `docker-compose.yml`.
 To run the local integration test suite:
 
 ```bash
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/app \
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
 REDIS_URL=redis://127.0.0.1:6379/ \
 cargo test -- --test-threads=1
 ```
@@ -124,6 +124,6 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaa
 - Postgres is the source of truth for `likes` and `like_counts`.
 - Redis is used for count caching and rate limiting.
 - If Redis is unavailable on the read path, the service falls back to Postgres.
-- The leaderboard is intentionally simple in this phase: functional and reviewable, but not optimized for high scale.
-- The SSE endpoint is currently implemented with an in-memory event bus, which is suitable for a single instance but not yet for multi-instance fanout.
+- The leaderboard uses persisted total counts plus hourly preaggregation for time-windowed top queries.
+- The SSE endpoint uses Redis Pub/Sub so event fanout is not tied to a single process.
 - The service includes internal Profile API and Content API mocks to simplify local development and integration.

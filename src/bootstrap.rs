@@ -17,7 +17,7 @@ use crate::shutdown::ShutdownSignal;
 use crate::sse_events::LikeEvents;
 use axum::{middleware, routing::get, Router};
 use redis::AsyncCommands;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -31,6 +31,8 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
             eprintln!("database connection error: {error}");
             std::process::exit(1);
         });
+
+    ensure_like_top_schema(&db_pool).await;
 
     let redis_client = redis::Client::open(config.redis_url.clone()).unwrap_or_else(|error| {
         eprintln!("redis configuration error: {error}");
@@ -148,4 +150,67 @@ fn build_content_type_registry(config: &ServiceConfig) -> ContentTypeRegistry {
             base_url: config.top_picks_content_api_base_url.clone(),
         },
     ])
+}
+
+async fn ensure_like_top_schema(db_pool: &PgPool) {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS like_hourly_counts (
+            bucket_start TIMESTAMPTZ NOT NULL,
+            content_type TEXT NOT NULL,
+            content_id TEXT NOT NULL,
+            like_count BIGINT NOT NULL DEFAULT 0,
+            PRIMARY KEY (bucket_start, content_type, content_id),
+            CONSTRAINT like_hourly_counts_non_negative CHECK (like_count >= 0)
+        )
+        "#,
+    )
+    .execute(db_pool)
+    .await
+    .unwrap_or_else(|error| {
+        eprintln!("database schema error: {error}");
+        std::process::exit(1);
+    });
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_like_hourly_counts_content_bucket
+            ON like_hourly_counts (content_type, bucket_start DESC)
+        "#,
+    )
+    .execute(db_pool)
+    .await
+    .unwrap_or_else(|error| {
+        eprintln!("database schema error: {error}");
+        std::process::exit(1);
+    });
+
+    let hourly_row_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM like_hourly_counts")
+        .fetch_one(db_pool)
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("database schema error: {error}");
+            std::process::exit(1);
+        });
+
+    if hourly_row_count == 0 {
+        sqlx::query(
+            r#"
+            INSERT INTO like_hourly_counts (bucket_start, content_type, content_id, like_count)
+            SELECT
+                date_trunc('hour', liked_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_start,
+                content_type,
+                content_id,
+                COUNT(*)::bigint AS like_count
+            FROM likes
+            GROUP BY 1, 2, 3
+            "#,
+        )
+        .execute(db_pool)
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("database schema error: {error}");
+            std::process::exit(1);
+        });
+    }
 }

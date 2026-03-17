@@ -459,6 +459,95 @@ async fn top_likes_returns_items_sorted_by_count() {
 
 #[tokio::test]
 #[serial]
+async fn top_likes_respects_window_boundaries() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    insert_like_directly_with_offset(
+        &server.database_url,
+        "44444444-4444-4444-4444-444444444444",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa9",
+        "40 days",
+    )
+    .await;
+    insert_like_directly_with_offset(
+        &server.database_url,
+        "55555555-5555-5555-5555-555555555555",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa9",
+        "40 days",
+    )
+    .await;
+    insert_like_directly_with_offset(
+        &server.database_url,
+        "66666666-6666-6666-6666-666666666666",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa9",
+        "40 days",
+    )
+    .await;
+    insert_like_directly_with_offset(
+        &server.database_url,
+        "77777777-7777-7777-7777-777777777777",
+        "bonus_hunter",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb9",
+        "1 hour",
+    )
+    .await;
+    insert_like_directly_with_offset(
+        &server.database_url,
+        "88888888-8888-8888-8888-888888888888",
+        "bonus_hunter",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb9",
+        "1 hour",
+    )
+    .await;
+
+    let all_response = server
+        .client
+        .get(format!("{}/v1/likes/top?window=all&limit=10", server.base_url))
+        .send()
+        .await
+        .expect("top all request must succeed");
+
+    assert_eq!(all_response.status(), StatusCode::OK);
+
+    let all_body: Value = all_response
+        .json()
+        .await
+        .expect("top all response must be valid json");
+    assert_eq!(all_body["items"][0]["content_type"], "post");
+    assert_eq!(
+        all_body["items"][0]["content_id"],
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa9"
+    );
+    assert_eq!(all_body["items"][0]["count"], 3);
+
+    let recent_response = server
+        .client
+        .get(format!("{}/v1/likes/top?window=30d&limit=10", server.base_url))
+        .send()
+        .await
+        .expect("top recent request must succeed");
+
+    assert_eq!(recent_response.status(), StatusCode::OK);
+
+    let recent_body: Value = recent_response
+        .json()
+        .await
+        .expect("top recent response must be valid json");
+    assert_eq!(recent_body["items"][0]["content_type"], "bonus_hunter");
+    assert_eq!(
+        recent_body["items"][0]["content_id"],
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb9"
+    );
+    assert_eq!(recent_body["items"][0]["count"], 2);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn likes_stream_emits_like_event() {
     let server = TestServer::spawn(|_| {}).await;
     let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2";
@@ -1101,10 +1190,31 @@ async fn cleanup_database(database_url: &str) {
         .await
         .expect("test database connection must work");
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS like_hourly_counts (
+            bucket_start TIMESTAMPTZ NOT NULL,
+            content_type TEXT NOT NULL,
+            content_id TEXT NOT NULL,
+            like_count BIGINT NOT NULL DEFAULT 0,
+            PRIMARY KEY (bucket_start, content_type, content_id),
+            CONSTRAINT like_hourly_counts_non_negative CHECK (like_count >= 0)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("test hourly counts table ensure must succeed");
+
     sqlx::query("TRUNCATE likes, like_counts")
         .execute(&pool)
         .await
         .expect("test database cleanup must succeed");
+
+    sqlx::query("TRUNCATE like_hourly_counts")
+        .execute(&pool)
+        .await
+        .expect("test hourly counts cleanup must succeed");
 }
 
 async fn cleanup_redis(redis_url: &str) {
@@ -1209,6 +1319,17 @@ async fn insert_like_directly(
     content_type: &str,
     content_id: &str,
 ) {
+    insert_like_directly_with_offset(database_url, user_id, content_type, content_id, "0 hours")
+        .await;
+}
+
+async fn insert_like_directly_with_offset(
+    database_url: &str,
+    user_id: &str,
+    content_type: &str,
+    content_id: &str,
+    liked_at_offset: &str,
+) {
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database_url)
@@ -1222,14 +1343,15 @@ async fn insert_like_directly(
 
     sqlx::query(
         r#"
-        INSERT INTO likes (user_id, content_type, content_id)
-        VALUES ($1, $2, $3)
+        INSERT INTO likes (user_id, content_type, content_id, liked_at)
+        VALUES ($1, $2, $3, NOW() - ($4::interval))
         ON CONFLICT (user_id, content_type, content_id) DO NOTHING
         "#,
     )
     .bind(user_id)
     .bind(content_type)
     .bind(content_id)
+    .bind(liked_at_offset)
     .execute(&mut *transaction)
     .await
     .expect("test like insert must succeed");
@@ -1239,7 +1361,7 @@ async fn insert_like_directly(
         INSERT INTO like_counts (content_type, content_id, like_count)
         VALUES ($1, $2, 1)
         ON CONFLICT (content_type, content_id)
-        DO UPDATE SET like_count = 1
+        DO UPDATE SET like_count = like_counts.like_count + 1
         "#,
     )
     .bind(content_type)
@@ -1247,6 +1369,26 @@ async fn insert_like_directly(
     .execute(&mut *transaction)
     .await
     .expect("test like count upsert must succeed");
+
+    sqlx::query(
+        r#"
+        INSERT INTO like_hourly_counts (bucket_start, content_type, content_id, like_count)
+        VALUES (
+            date_trunc('hour', (NOW() - ($3::interval)) AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+            $1,
+            $2,
+            1
+        )
+        ON CONFLICT (bucket_start, content_type, content_id)
+        DO UPDATE SET like_count = like_hourly_counts.like_count + 1
+        "#,
+    )
+    .bind(content_type)
+    .bind(content_id)
+    .bind(liked_at_offset)
+    .execute(&mut *transaction)
+    .await
+    .expect("test like hourly count upsert must succeed");
 
     transaction
         .commit()

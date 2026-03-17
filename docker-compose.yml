@@ -10,6 +10,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/20260315120000_init_likes.sql:/docker-entrypoint-initdb.d/001_init_likes.sql:ro
+      - ./migrations/20260317133000_add_like_hourly_counts.sql:/docker-entrypoint-initdb.d/002_add_like_hourly_counts.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d likes_service"]
       interval: 5s

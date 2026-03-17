@@ -31,9 +31,9 @@ impl<'a> PostgresLikesRepository<'a> {
         )
         .bind(user_id.to_string())
         .bind(content_type.to_string())
-        .bind(content_id.to_string())
-        .execute(&mut *transaction)
-        .await?;
+            .bind(content_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
 
         let insert_result = if result.rows_affected() == 1 {
             sqlx::query(
@@ -42,6 +42,24 @@ impl<'a> PostgresLikesRepository<'a> {
                 VALUES ($1, $2, 1)
                 ON CONFLICT (content_type, content_id)
                 DO UPDATE SET like_count = like_counts.like_count + 1
+                "#,
+            )
+            .bind(content_type.to_string())
+            .bind(content_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO like_hourly_counts (bucket_start, content_type, content_id, like_count)
+                VALUES (
+                    date_trunc('hour', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+                    $1,
+                    $2,
+                    1
+                )
+                ON CONFLICT (bucket_start, content_type, content_id)
+                DO UPDATE SET like_count = like_hourly_counts.like_count + 1
                 "#,
             )
             .bind(content_type.to_string())
@@ -67,21 +85,22 @@ impl<'a> PostgresLikesRepository<'a> {
     ) -> Result<DeleteLikeResult, AppError> {
         let mut transaction = self.db_pool.begin().await?;
 
-        let result = sqlx::query(
+        let deleted_bucket_start = sqlx::query_scalar::<_, String>(
             r#"
             DELETE FROM likes
             WHERE user_id = $1
               AND content_type = $2
               AND content_id = $3
+            RETURNING (date_trunc('hour', liked_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')::text
             "#,
         )
         .bind(user_id.to_string())
         .bind(content_type.to_string())
         .bind(content_id.to_string())
-        .execute(&mut *transaction)
+        .fetch_optional(&mut *transaction)
         .await?;
 
-        let delete_result = if result.rows_affected() == 1 {
+        let delete_result = if let Some(bucket_start) = deleted_bucket_start {
             sqlx::query(
                 r#"
                 INSERT INTO like_counts (content_type, content_id, like_count)
@@ -90,6 +109,20 @@ impl<'a> PostgresLikesRepository<'a> {
                 DO UPDATE SET like_count = GREATEST(like_counts.like_count - 1, 0)
                 "#,
             )
+            .bind(content_type.to_string())
+            .bind(content_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO like_hourly_counts (bucket_start, content_type, content_id, like_count)
+                VALUES ($1::timestamptz, $2, $3, 0)
+                ON CONFLICT (bucket_start, content_type, content_id)
+                DO UPDATE SET like_count = GREATEST(like_hourly_counts.like_count - 1, 0)
+                "#,
+            )
+            .bind(bucket_start)
             .bind(content_type.to_string())
             .bind(content_id.to_string())
             .execute(&mut *transaction)
@@ -353,22 +386,44 @@ impl<'a> PostgresLikesRepository<'a> {
         window: &TopLikesWindow,
         limit: usize,
     ) -> Result<Vec<TopLikeRow>, AppError> {
-        let rows: Vec<(String, String, i64)> = sqlx::query_as(
-            r#"
-            SELECT content_type, content_id, COUNT(*)::bigint AS like_count
-            FROM likes
-            WHERE ($1::text IS NULL OR content_type = $1)
-              AND ($2::text IS NULL OR liked_at >= NOW() - ($2::interval))
-            GROUP BY content_type, content_id
-            ORDER BY like_count DESC, content_type DESC, content_id DESC
-            LIMIT $3
-            "#,
-        )
-        .bind(content_type.map(ToString::to_string))
-        .bind(window.as_interval())
-        .bind(limit as i64)
-        .fetch_all(self.db_pool)
-        .await?;
+        let rows: Vec<(String, String, i64)> = match window {
+            TopLikesWindow::All => {
+                sqlx::query_as(
+                    r#"
+                    SELECT content_type, content_id, like_count
+                    FROM like_counts
+                    WHERE like_count > 0
+                      AND ($1::text IS NULL OR content_type = $1)
+                    ORDER BY like_count DESC, content_type DESC, content_id DESC
+                    LIMIT $2
+                    "#,
+                )
+                .bind(content_type.map(ToString::to_string))
+                .bind(limit as i64)
+                .fetch_all(self.db_pool)
+                .await?
+            }
+            _ => {
+                sqlx::query_as(
+                    r#"
+                    SELECT content_type, content_id, SUM(like_count)::bigint AS like_count
+                    FROM like_hourly_counts
+                    WHERE like_count > 0
+                      AND ($1::text IS NULL OR content_type = $1)
+                      AND bucket_start >= NOW() - ($2::interval)
+                    GROUP BY content_type, content_id
+                    HAVING SUM(like_count) > 0
+                    ORDER BY like_count DESC, content_type DESC, content_id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(content_type.map(ToString::to_string))
+                .bind(window.as_interval().expect("non-all windows must have an interval"))
+                .bind(limit as i64)
+                .fetch_all(self.db_pool)
+                .await?
+            }
+        };
 
         Ok(rows
             .into_iter()
