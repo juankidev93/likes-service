@@ -164,14 +164,15 @@ pub async fn get_like_count(
         }
         Err(error) => {
             record_cache_operation("get_like_count", "error");
-            return error.into_response();
+            tracing::warn!(error = %error, "redis unavailable for get_like_count, falling back to postgres");
         }
     }
 
     match repository.get_like_count(&content_type, &content_id).await {
         Ok(count) => {
             if let Err(error) = cache_like_count(&state, &cache_key, count.count).await {
-                return error.into_response();
+                record_cache_operation("get_like_count", "error");
+                tracing::warn!(error = %error, "failed to populate redis cache for get_like_count");
             }
 
             success(Json(LikeCountResponse::from_parts(
@@ -277,7 +278,8 @@ pub async fn get_like_counts_batch(
         Ok(values) => values,
         Err(error) => {
             record_cache_operation("get_like_counts_batch", "error");
-            return error.into_response();
+            tracing::warn!(error = %error, "redis unavailable for get_like_counts_batch, falling back to postgres");
+            vec![None; parsed_items.len()]
         }
     };
 
@@ -313,7 +315,8 @@ pub async fn get_like_counts_batch(
                 cache_like_count(&state, &like_count_cache_key(content_type, content_id), count)
                     .await
             {
-                return error.into_response();
+                record_cache_operation("get_like_counts_batch", "error");
+                tracing::warn!(error = %error, "failed to populate redis cache for get_like_counts_batch");
             }
         }
     }
