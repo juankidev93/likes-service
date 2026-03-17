@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: likes_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/20260315120000_init_likes.sql:/docker-entrypoint-initdb.d/001_init_likes.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d likes_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      network: host
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SERVICE_HOST: 0.0.0.0
+      SERVICE_PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/likes_service
+      REDIS_URL: redis://redis:6379/
+      PROFILE_API_BASE_URL: http://app:3000
+      POST_CONTENT_API_BASE_URL: http://app:3000
+      BONUS_HUNTER_CONTENT_API_BASE_URL: http://app:3000
+      TOP_PICKS_CONTENT_API_BASE_URL: http://app:3000
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
