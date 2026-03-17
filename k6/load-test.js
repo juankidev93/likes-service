@@ -3,10 +3,21 @@ import { check, sleep } from 'k6';
 import exec from 'k6/execution';
 
 const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:3000';
+const RATE_LIMIT_AWARE = (__ENV.RATE_LIMIT_AWARE || 'true') === 'true';
 const TOKENS = (__ENV.TOKENS || 'tok_user_1,tok_user_2,tok_user_3,tok_user_4,tok_user_5')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
+const WRITE_LIMIT_PER_MINUTE = Number(__ENV.RATE_LIMIT_WRITE_PER_MINUTE || 30);
+const WRITE_SAFETY_FACTOR = Number(__ENV.WRITE_SAFETY_FACTOR || 0.8);
+const DEFAULT_WRITE_RATE = Math.max(
+  1,
+  Math.floor((TOKENS.length * WRITE_LIMIT_PER_MINUTE * WRITE_SAFETY_FACTOR) / 60),
+);
+const DEFAULT_MIXED_RATE = Math.max(
+  1,
+  Math.floor(DEFAULT_WRITE_RATE / 0.05),
+);
 
 const POST_IDS = (__ENV.POST_IDS || [
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1',
@@ -71,7 +82,7 @@ export const options = {
     write_path: {
       executor: 'constant-arrival-rate',
       exec: 'writeLikeScenario',
-      rate: Number(__ENV.WRITE_RATE || 10),
+      rate: Number(__ENV.WRITE_RATE || DEFAULT_WRITE_RATE),
       timeUnit: '1s',
       duration: __ENV.WRITE_DURATION || '30s',
       preAllocatedVUs: Number(__ENV.WRITE_VUS || 10),
@@ -81,7 +92,7 @@ export const options = {
     mixed_path: {
       executor: 'constant-arrival-rate',
       exec: 'mixedScenario',
-      rate: Number(__ENV.MIXED_RATE || 50),
+      rate: Number(__ENV.MIXED_RATE || DEFAULT_MIXED_RATE),
       timeUnit: '1s',
       duration: __ENV.MIXED_DURATION || '30s',
       preAllocatedVUs: Number(__ENV.MIXED_VUS || 20),
@@ -89,12 +100,7 @@ export const options = {
       startTime: '6s',
     },
   },
-  thresholds: {
-    http_req_failed: ['rate<0.01'],
-    'http_req_duration{endpoint:read_count}': ['p(99)<10'],
-    'http_req_duration{endpoint:batch_counts}': ['p(99)<50'],
-    'http_req_duration{endpoint:write_like}': ['p(99)<100'],
-  },
+  thresholds: buildThresholds(),
 };
 
 export function setup() {
@@ -115,6 +121,7 @@ export function readCountScenario(data) {
   const response = http.get(
     `${data.baseUrl}/v1/likes/${item.content_type}/${item.content_id}/count`,
     {
+      headers: publicHeaders(),
       tags: { endpoint: 'read_count' },
     },
   );
@@ -131,7 +138,7 @@ export function batchCountsScenario(data) {
     `${data.baseUrl}/v1/likes/batch/counts`,
     JSON.stringify({ items }),
     {
-      headers: jsonHeaders(),
+      headers: publicHeaders(),
       tags: { endpoint: 'batch_counts' },
     },
   );
@@ -192,6 +199,16 @@ function jsonHeaders() {
   };
 }
 
+function publicHeaders() {
+  const headers = jsonHeaders();
+
+  if (RATE_LIMIT_AWARE) {
+    headers['X-Forwarded-For'] = syntheticClientIp();
+  }
+
+  return headers;
+}
+
 function authHeaders(token) {
   return {
     ...jsonHeaders(),
@@ -205,4 +222,24 @@ function safeJson(response) {
   } catch (_) {
     return null;
   }
+}
+
+function syntheticClientIp() {
+  const iteration = exec.scenario.iterationInTest;
+  const secondOctet = 113 + (iteration % 10);
+  const thirdOctet = Math.floor(iteration / 10) % 250;
+  const fourthOctet = (iteration % 250) + 1;
+  return `203.${secondOctet}.${thirdOctet}.${fourthOctet}`;
+}
+
+function buildThresholds() {
+  const thresholds = {
+    'http_req_duration{endpoint:read_count}': [`p(99)<${Number(__ENV.READ_P99_MS || 10)}`],
+    'http_req_duration{endpoint:batch_counts}': [`p(99)<${Number(__ENV.BATCH_P99_MS || 50)}`],
+    'http_req_duration{endpoint:write_like}': [`p(99)<${Number(__ENV.WRITE_P99_MS || 100)}`],
+  };
+
+  thresholds.http_req_failed = RATE_LIMIT_AWARE ? ['rate<0.01'] : ['rate<0.95'];
+
+  return thresholds;
 }

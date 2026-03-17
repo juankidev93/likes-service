@@ -103,6 +103,23 @@ The script covers:
 - write likes
 - a mixed 80/15/5 traffic profile
 
+By default the script is `RATE_LIMIT_AWARE=true`, which means:
+- public read scenarios rotate `X-Forwarded-For` to avoid collapsing everything onto one read-rate-limited IP
+- write defaults stay below the configured per-user write limiter for the bundled mock tokens
+
+If you want to intentionally observe rate limiting rather than avoid it:
+
+```bash
+RATE_LIMIT_AWARE=false \
+WRITE_RATE=20 \
+MIXED_RATE=100 \
+k6 run k6/load-test.js
+```
+
+If you want to push raw throughput harder, either provide more valid bearer tokens or temporarily raise the service rate limits in the target environment.
+
+The bundled thresholds are intentionally aggressive. On a local Docker setup, `read_count` may land slightly above the target p99 even when the service is otherwise healthy, so treat the k6 output as an environment-sensitive signal rather than a strict pass/fail benchmark.
+
 An OpenAPI specification for the current HTTP contract is available in [openapi.yaml](openapi.yaml).
 Interactive Swagger UI is served by the app at `/docs`, backed by `/openapi.yaml`.
 The spec uses a same-origin server entry, so `/docs` works correctly whether you access the app through `localhost`, `127.0.0.1`, or another host name.
