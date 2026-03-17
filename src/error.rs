@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::content_validation::ContentValidationError;
+use crate::logging::ErrorLogContext;
 use axum::{
     http::{header::HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
@@ -96,9 +97,10 @@ impl From<redis::RedisError> for AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        let error_context = self.error_log_context();
         let (status, code, message) = self.as_http_error();
 
-        (
+        let mut response = (
             status,
             Json(HttpErrorBody {
                 error: HttpErrorDetail {
@@ -107,7 +109,13 @@ impl IntoResponse for AppError {
                 },
             }),
         )
-            .into_response()
+            .into_response();
+
+        if let Some(error_context) = error_context {
+            response.extensions_mut().insert(error_context);
+        }
+
+        response
     }
 }
 
@@ -217,6 +225,22 @@ impl AppError {
                 "INTERNAL_ERROR",
                 "internal error".to_string(),
             ),
+        }
+    }
+
+    fn error_log_context(&self) -> Option<ErrorLogContext> {
+        match self {
+            Self::Database(error) => Some(ErrorLogContext {
+                error_type: "database_error",
+                error_message: error.to_string(),
+                stack_trace: Some(std::backtrace::Backtrace::force_capture().to_string()),
+            }),
+            Self::Cache(error) => Some(ErrorLogContext {
+                error_type: "cache_error",
+                error_message: error.to_string(),
+                stack_trace: Some(std::backtrace::Backtrace::force_capture().to_string()),
+            }),
+            _ => None,
         }
     }
 }

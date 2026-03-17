@@ -1,5 +1,6 @@
 use crate::app_state::AppState;
 use crate::error::AppError;
+use crate::logging::LoggedUserId;
 use crate::profile_api_client::{AuthError, AuthenticatedUser};
 use axum::{
     extract::Request,
@@ -15,8 +16,12 @@ pub async fn require_auth(
 ) -> Response {
     match authenticate_headers(&state, request.headers()).await {
         Ok(authenticated_user) => {
-            request.extensions_mut().insert(authenticated_user);
-            next.run(request).await
+            request.extensions_mut().insert(authenticated_user.clone());
+            let mut response = next.run(request).await;
+            response
+                .extensions_mut()
+                .insert(LoggedUserId(authenticated_user.user_id));
+            response
         }
         Err(response) => response,
     }

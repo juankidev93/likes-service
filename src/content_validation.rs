@@ -212,7 +212,7 @@ impl ContentValidationClient {
             Ok(connection) => connection,
             Err(error) => {
                 record_cache_operation("validate_content", "error");
-                tracing::warn!(error = %error, "redis unavailable for content validation cache read");
+                tracing::warn!(service = "likes_service", error = %error, "redis unavailable for content validation cache read");
                 return None;
             }
         };
@@ -221,7 +221,7 @@ impl ContentValidationClient {
             Ok(value) => value,
             Err(error) => {
                 record_cache_operation("validate_content", "error");
-                tracing::warn!(error = %error, "failed to read content validation cache entry");
+                tracing::warn!(service = "likes_service", error = %error, "failed to read content validation cache entry");
                 return None;
             }
         };
@@ -234,7 +234,7 @@ impl ContentValidationClient {
                 }
                 Err(error) => {
                     record_cache_operation("validate_content", "error");
-                    tracing::warn!(error = %error, "failed to decode content validation cache entry");
+                    tracing::warn!(service = "likes_service", error = %error, "failed to decode content validation cache entry");
                     None
                 }
             },
@@ -255,7 +255,7 @@ impl ContentValidationClient {
         let payload = match serde_json::to_string(&result) {
             Ok(payload) => payload,
             Err(error) => {
-                tracing::warn!(error = %error, "failed to serialize content validation cache entry");
+                tracing::warn!(service = "likes_service", error = %error, "failed to serialize content validation cache entry");
                 return;
             }
         };
@@ -264,7 +264,7 @@ impl ContentValidationClient {
             Ok(connection) => connection,
             Err(error) => {
                 record_cache_operation("validate_content", "error");
-                tracing::warn!(error = %error, "redis unavailable for content validation cache write");
+                tracing::warn!(service = "likes_service", error = %error, "redis unavailable for content validation cache write");
                 return;
             }
         };
@@ -274,7 +274,7 @@ impl ContentValidationClient {
             .await
         {
             record_cache_operation("validate_content", "error");
-            tracing::warn!(error = %error, "failed to write content validation cache entry");
+            tracing::warn!(service = "likes_service", error = %error, "failed to write content validation cache entry");
         }
     }
 }

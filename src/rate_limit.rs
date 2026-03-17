@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use crate::auth_middleware::authenticate_headers;
 use crate::error::{set_rate_limit_headers, AppError};
+use crate::logging::LoggedUserId;
 use crate::metrics::{
     record_rate_limit_allowed, record_rate_limit_fail_open, record_rate_limit_rejected,
 };
@@ -36,9 +37,17 @@ pub async fn require_write_auth_and_rate_limit(
         Ok(state) => state,
         Err(error) => {
             record_rate_limit_fail_open(WRITE_SCOPE);
-            warn!(error = %error, "redis unavailable for write rate limiting, allowing request");
-            request.extensions_mut().insert(authenticated_user);
-            return next.run(request).await;
+            warn!(
+                service = "likes_service",
+                error = %error,
+                "redis unavailable for write rate limiting, allowing request"
+            );
+            request.extensions_mut().insert(authenticated_user.clone());
+            let mut response = next.run(request).await;
+            response
+                .extensions_mut()
+                .insert(LoggedUserId(authenticated_user.user_id));
+            return response;
         }
     };
 
@@ -57,8 +66,11 @@ pub async fn require_write_auth_and_rate_limit(
     }
 
     record_rate_limit_allowed(WRITE_SCOPE);
-    request.extensions_mut().insert(authenticated_user);
+    request.extensions_mut().insert(authenticated_user.clone());
     let mut response = next.run(request).await;
+    response
+        .extensions_mut()
+        .insert(LoggedUserId(authenticated_user.user_id));
     set_rate_limit_headers(
         &mut response,
         limit,
@@ -84,7 +96,11 @@ pub async fn require_read_rate_limit(
         Ok(state) => state,
         Err(error) => {
             record_rate_limit_fail_open(READ_SCOPE);
-            warn!(error = %error, "redis unavailable for read rate limiting, allowing request");
+            warn!(
+                service = "likes_service",
+                error = %error,
+                "redis unavailable for read rate limiting, allowing request"
+            );
             return next.run(request).await;
         }
     };

@@ -46,7 +46,7 @@ async fn main() {
         .await
         .expect("failed to bind TCP listener");
 
-    tracing::info!(address = %config.bind_address(), "starting HTTP server");
+    tracing::info!(service = "likes_service", address = %config.bind_address(), "starting HTTP server");
 
     axum::serve(
         listener,
@@ -56,7 +56,7 @@ async fn main() {
         .await
         .expect("HTTP server failed");
 
-    tracing::info!("HTTP server stopped");
+    tracing::info!(service = "likes_service", "HTTP server stopped");
 }
 
 async fn shutdown_signal(shutdown_handle: crate::shutdown::ShutdownSignal) {
@@ -79,10 +79,10 @@ async fn shutdown_signal(shutdown_handle: crate::shutdown::ShutdownSignal) {
 
     tokio::select! {
         _ = ctrl_c => {
-            tracing::info!("received Ctrl+C, starting graceful shutdown");
+            tracing::info!(service = "likes_service", "received Ctrl+C, starting graceful shutdown");
         }
         _ = terminate => {
-            tracing::info!("received SIGTERM, starting graceful shutdown");
+            tracing::info!(service = "likes_service", "received SIGTERM, starting graceful shutdown");
         }
     }
 

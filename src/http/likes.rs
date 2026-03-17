@@ -63,7 +63,7 @@ pub(crate) async fn create_like(
                     )
                     .await
                 {
-                    tracing::warn!(error = %error, "failed to publish like event");
+                    tracing::warn!(service = "likes_service", error = %error, "failed to publish like event");
                 }
             }
 
@@ -122,7 +122,7 @@ pub(crate) async fn delete_like(
                     )
                     .await
                 {
-                    tracing::warn!(error = %error, "failed to publish unlike event");
+                    tracing::warn!(service = "likes_service", error = %error, "failed to publish unlike event");
                 }
             }
 
@@ -196,6 +196,7 @@ pub(crate) async fn get_like_count(
         Err(error) => {
             record_cache_operation("get_like_count", "error");
             tracing::warn!(
+                service = "likes_service",
                 error = %error,
                 "redis unavailable for get_like_count, falling back to postgres"
             );
@@ -206,7 +207,7 @@ pub(crate) async fn get_like_count(
         Ok(count) => {
             if let Err(error) = cache_like_count(&state, &cache_key, count.count).await {
                 record_cache_operation("get_like_count", "error");
-                tracing::warn!(error = %error, "failed to populate redis cache for get_like_count");
+                tracing::warn!(service = "likes_service", error = %error, "failed to populate redis cache for get_like_count");
             }
 
             success(Json(LikeCountResponse::from_parts(

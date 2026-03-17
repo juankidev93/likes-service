@@ -1,7 +1,9 @@
 use axum::{
+    extract::State,
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
+use crate::app_state::AppState;
 use once_cell::sync::Lazy;
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry,
@@ -186,6 +188,17 @@ static RATE_LIMIT_FAIL_OPEN_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     .expect("rate limit fail-open counter must be valid")
 });
 
+static DB_POOL_CONNECTIONS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    IntGaugeVec::new(
+        Opts::new(
+            "social_api_db_pool_connections",
+            "Current number of database pool connections by state",
+        ),
+        &["state"],
+    )
+    .expect("db pool connections gauge must be valid")
+});
+
 pub fn init_metrics() {
     REGISTRY
         .register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
@@ -235,6 +248,9 @@ pub fn init_metrics() {
     REGISTRY
         .register(Box::new(RATE_LIMIT_FAIL_OPEN_TOTAL.clone()))
         .expect("rate limit fail-open counter must register");
+    REGISTRY
+        .register(Box::new(DB_POOL_CONNECTIONS.clone()))
+        .expect("db pool connections gauge must register");
 }
 
 pub fn record_http_request(method: &str, path: &str, status: u16, latency_seconds: f64) {
@@ -317,7 +333,19 @@ pub fn record_rate_limit_fail_open(scope: &str) {
     RATE_LIMIT_FAIL_OPEN_TOTAL.with_label_values(&[scope]).inc();
 }
 
-pub async fn metrics_handler() -> Response {
+fn update_db_pool_metrics(state: &AppState) {
+    let total = state.db_pool.size() as i64;
+    let idle = state.db_pool.num_idle() as i64;
+    let active = total.saturating_sub(idle);
+
+    DB_POOL_CONNECTIONS.with_label_values(&["total"]).set(total);
+    DB_POOL_CONNECTIONS.with_label_values(&["idle"]).set(idle);
+    DB_POOL_CONNECTIONS.with_label_values(&["active"]).set(active);
+}
+
+pub async fn metrics_handler(State(state): State<AppState>) -> Response {
+    update_db_pool_metrics(&state);
+
     let metric_families = REGISTRY.gather();
     let mut buffer = Vec::new();
     let encoder = TextEncoder::new();

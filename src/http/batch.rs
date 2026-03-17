@@ -42,6 +42,7 @@ pub(crate) async fn get_like_counts_batch(
         Err(error) => {
             record_cache_operation("get_like_counts_batch", "error");
             tracing::warn!(
+                service = "likes_service",
                 error = %error,
                 "redis unavailable for get_like_counts_batch, falling back to postgres"
             );
@@ -83,6 +84,7 @@ pub(crate) async fn get_like_counts_batch(
             {
                 record_cache_operation("get_like_counts_batch", "error");
                 tracing::warn!(
+                    service = "likes_service",
                     error = %error,
                     "failed to populate redis cache for get_like_counts_batch"
                 );

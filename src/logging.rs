@@ -11,10 +11,21 @@ use uuid::Uuid;
 use crate::metrics::record_http_request;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
+const SERVICE_NAME: &str = "likes_service";
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct RequestId(pub String);
+
+#[derive(Clone, Debug)]
+pub struct LoggedUserId(pub String);
+
+#[derive(Clone, Debug)]
+pub struct ErrorLogContext {
+    pub error_type: &'static str,
+    pub error_message: String,
+    pub stack_trace: Option<String>,
+}
 
 pub fn init_tracing() {
     tracing_subscriber::fmt()
@@ -50,6 +61,11 @@ pub async fn request_logging_middleware(mut request: Request, next: Next) -> Res
     let elapsed = start.elapsed();
     let latency_ms = elapsed.as_millis();
     let latency_seconds = elapsed.as_secs_f64();
+    let user_id = response
+        .extensions()
+        .get::<LoggedUserId>()
+        .map(|value| value.0.clone());
+    let error_context = response.extensions().get::<ErrorLogContext>().cloned();
 
     response.headers_mut().insert(
         HeaderName::from_static(REQUEST_ID_HEADER),
@@ -58,14 +74,52 @@ pub async fn request_logging_middleware(mut request: Request, next: Next) -> Res
 
     record_http_request(&method, &path, status, latency_seconds);
 
-    info!(
-        method = method,
-        path = path,
-        status_code = status,
-        latency_ms = latency_ms,
-        request_id = request_id,
-        "request completed"
-    );
+    match (status >= 500, user_id.as_deref(), error_context) {
+        (true, Some(user_id), Some(error_context)) => tracing::error!(
+            service = SERVICE_NAME,
+            method = method,
+            path = path,
+            status_code = status,
+            latency_ms = latency_ms,
+            request_id = request_id,
+            user_id = user_id,
+            error_type = error_context.error_type,
+            error_message = error_context.error_message,
+            stack_trace = error_context.stack_trace.unwrap_or_else(|| "unavailable".to_string()),
+            "request failed"
+        ),
+        (true, None, Some(error_context)) => tracing::error!(
+            service = SERVICE_NAME,
+            method = method,
+            path = path,
+            status_code = status,
+            latency_ms = latency_ms,
+            request_id = request_id,
+            error_type = error_context.error_type,
+            error_message = error_context.error_message,
+            stack_trace = error_context.stack_trace.unwrap_or_else(|| "unavailable".to_string()),
+            "request failed"
+        ),
+        (_, Some(user_id), _) => info!(
+            service = SERVICE_NAME,
+            method = method,
+            path = path,
+            status_code = status,
+            latency_ms = latency_ms,
+            request_id = request_id,
+            user_id = user_id,
+            "request completed"
+        ),
+        _ => info!(
+            service = SERVICE_NAME,
+            method = method,
+            path = path,
+            status_code = status,
+            latency_ms = latency_ms,
+            request_id = request_id,
+            "request completed"
+        ),
+    };
 
     response
 }
