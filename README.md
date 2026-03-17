@@ -80,6 +80,8 @@ REDIS_URL=redis://127.0.0.1:6379/ \
 cargo test -- --test-threads=1
 ```
 
+An OpenAPI specification for the current HTTP contract is available in [openapi.yaml](openapi.yaml).
+
 ## Main Endpoints
 
 Health and observability:
