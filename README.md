@@ -119,11 +119,27 @@ Open the SSE stream:
 curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'
 ```
 
-## Design Notes
+## Architecture Summary
 
-- Postgres is the source of truth for `likes` and `like_counts`.
-- Redis is used for count caching and rate limiting.
-- If Redis is unavailable on the read path, the service falls back to Postgres.
-- The leaderboard uses persisted total counts plus hourly preaggregation for time-windowed top queries.
-- The SSE endpoint uses Redis Pub/Sub so event fanout is not tied to a single process.
-- The service includes internal Profile API and Content API mocks to simplify local development and integration.
+- Postgres is the source of truth for `likes`, `like_counts`, and hourly leaderboard aggregates.
+- Redis is used for count caching, rate limiting, and SSE event fanout through Pub/Sub.
+- Profile API and Content API are represented by internal mock endpoints so the service can be run and tested locally as a single process.
+
+## Trade-Offs
+
+- Count reads use Redis as a cache, but fall back to Postgres when Redis is unavailable. This keeps the read path available at the cost of degraded performance.
+- `GET /v1/likes/top` uses persisted totals for `window=all` and hourly preaggregation for `24h`, `7d`, and `30d`. This is simpler and more scalable than aggregating directly from `likes` on every request, while staying easier to review than a more advanced pipeline.
+- `GET /v1/likes/stream` uses Redis Pub/Sub. This makes the stream work across instances that share Redis, without introducing a heavier event system.
+- Circuit breakers and rate limiters are intentionally simple. They provide operational protection and visibility without adding too much state-machine complexity to the codebase.
+
+## Known Limitations
+
+- Leaderboard aggregation is still relatively simple. A higher-scale version would likely use background materialization, retention policies for old buckets, and more explicit indexing and query tuning.
+- Redis Pub/Sub does not provide replay or durable event delivery. It is a good fit for live SSE fanout, but not for event history.
+- The project is optimized for clarity and challenge delivery, not for multi-region deployment or very high write throughput.
+
+## Next Scaling Steps
+
+- Add retention and compaction strategy for old hourly leaderboard buckets.
+- Move health, topology, and trade-off notes into more explicit operational documentation if the service becomes long-lived.
+- Introduce stronger migration management for schema evolution beyond Docker init scripts and startup schema checks.
