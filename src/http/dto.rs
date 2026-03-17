@@ -26,7 +26,7 @@ pub(crate) struct UserLikesQuery {
     pub(crate) content_type: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(crate) struct TopLikesQuery {
     pub(crate) window: Option<String>,
     pub(crate) limit: Option<usize>,
