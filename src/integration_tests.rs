@@ -228,6 +228,61 @@ async fn profile_api_circuit_breaker_opens_and_rejects_following_requests() {
 
 #[tokio::test]
 #[serial]
+async fn content_api_circuit_breaker_opens_and_rejects_following_requests() {
+    let server = TestServer::spawn(|config| {
+        config.post_content_api_base_url = "http://127.0.0.1:9".to_string();
+        config.bonus_hunter_content_api_base_url = "http://127.0.0.1:9".to_string();
+        config.top_picks_content_api_base_url = "http://127.0.0.1:9".to_string();
+        config.circuit_breaker_failure_threshold = 1;
+        config.circuit_breaker_open_seconds = 60;
+    })
+    .await;
+
+    let first_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+        }))
+        .send()
+        .await
+        .expect("first request must succeed");
+
+    assert_eq!(first_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let second_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+        }))
+        .send()
+        .await
+        .expect("second request must succeed");
+
+    assert_eq!(second_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let metrics_body = fetch_metrics(&server).await;
+
+    assert!(metrics_body.contains(
+        "social_api_circuit_breaker_open_total{service=\"content_api\"}"
+    ));
+    assert!(metrics_body.contains(
+        "social_api_circuit_breaker_rejected_total{service=\"content_api\"}"
+    ));
+    assert!(metrics_body.contains("social_api_external_calls_total"));
+    assert!(metrics_body.contains("service=\"content_api\""));
+    assert!(metrics_body.contains("status=\"circuit_open\""));
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn top_likes_returns_items_sorted_by_count() {
     let server = TestServer::spawn(|_| {}).await;
 
