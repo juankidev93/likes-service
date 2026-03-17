@@ -517,7 +517,7 @@ impl FromStr for TopLikesWindow {
             "30d" => Ok(Self::Last30Days),
             "all" => Ok(Self::All),
             _ => Err(AppError::invalid_request(
-                "INVALID_REQUEST",
+                "INVALID_WINDOW",
                 "window must be one of: 24h, 7d, 30d, all",
             )),
         }

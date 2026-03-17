@@ -35,7 +35,7 @@ pub(super) fn parse_limit(limit: Option<usize>) -> Result<usize, AppError> {
 
     if limit == 0 || limit > MAX_BATCH_ITEMS {
         return Err(AppError::invalid_request(
-            "INVALID_REQUEST",
+            "INVALID_LIMIT",
             format!("limit must be between 1 and {MAX_BATCH_ITEMS}"),
         ));
     }
@@ -48,7 +48,7 @@ pub(super) fn parse_top_likes_limit(limit: Option<usize>) -> Result<usize, AppEr
 
     if limit == 0 || limit > MAX_TOP_LIKES_LIMIT {
         return Err(AppError::invalid_request(
-            "INVALID_REQUEST",
+            "INVALID_LIMIT",
             format!("limit must be between 1 and {MAX_TOP_LIKES_LIMIT}"),
         ));
     }
@@ -68,17 +68,17 @@ pub(super) fn encode_cursor(row: &UserLikeRow) -> String {
 pub(super) fn decode_cursor(value: &str) -> Result<LikesCursor, AppError> {
     let decoded = STANDARD
         .decode(value)
-        .map_err(|_| AppError::invalid_request("INVALID_REQUEST", "invalid cursor"))?;
+        .map_err(|_| AppError::invalid_request("INVALID_CURSOR", "invalid cursor"))?;
 
     let decoded = String::from_utf8(decoded)
-        .map_err(|_| AppError::invalid_request("INVALID_REQUEST", "invalid cursor"))?;
+        .map_err(|_| AppError::invalid_request("INVALID_CURSOR", "invalid cursor"))?;
 
     let (liked_at, content_id) = decoded
         .split_once('|')
-        .ok_or_else(|| AppError::invalid_request("INVALID_REQUEST", "invalid cursor"))?;
+        .ok_or_else(|| AppError::invalid_request("INVALID_CURSOR", "invalid cursor"))?;
 
     if liked_at.is_empty() || content_id.is_empty() {
-        return Err(AppError::invalid_request("INVALID_REQUEST", "invalid cursor"));
+        return Err(AppError::invalid_request("INVALID_CURSOR", "invalid cursor"));
     }
 
     Ok(LikesCursor {

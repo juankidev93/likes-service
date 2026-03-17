@@ -8,6 +8,7 @@ use axum::{
     Json,
 };
 use serde::Serialize;
+use serde_json::{json, Value};
 use std::{error::Error, fmt};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,7 +99,7 @@ impl From<redis::RedisError> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let error_context = self.error_log_context();
-        let (status, code, message) = self.as_http_error();
+        let (status, code, message, details) = self.as_http_error();
 
         let mut response = (
             status,
@@ -106,6 +107,8 @@ impl IntoResponse for AppError {
                 error: HttpErrorDetail {
                     code,
                     message,
+                    request_id: None,
+                    details,
                 },
             }),
         )
@@ -158,6 +161,13 @@ impl AppError {
                 error: HttpErrorDetail {
                     code,
                     message: message.into(),
+                    request_id: None,
+                    details: Some(json!({
+                        "limit": limit,
+                        "remaining": remaining,
+                        "reset_epoch_seconds": reset_epoch_seconds,
+                        "retry_after_seconds": retry_after_seconds,
+                    })),
                 },
             }),
         )
@@ -174,56 +184,82 @@ impl AppError {
         response
     }
 
-    fn as_http_error(self) -> (StatusCode, &'static str, String) {
+    fn as_http_error(self) -> (StatusCode, &'static str, String, Option<Value>) {
         match self {
-            Self::InvalidRequest { code, message } => (StatusCode::BAD_REQUEST, code, message),
-            Self::Unauthorized { code, message } => (StatusCode::UNAUTHORIZED, code, message),
+            Self::InvalidRequest { code, message } => {
+                (StatusCode::BAD_REQUEST, code, message, None)
+            }
+            Self::Unauthorized { code, message } => {
+                (StatusCode::UNAUTHORIZED, code, message, None)
+            }
             Self::DependencyUnavailable { code, message } => {
-                (StatusCode::SERVICE_UNAVAILABLE, code, message)
+                (StatusCode::SERVICE_UNAVAILABLE, code, message, None)
             }
             Self::Domain(error) => match error {
                 DomainError::InvalidContentType(_) => (
                     StatusCode::BAD_REQUEST,
-                    "INVALID_REQUEST",
+                    "INVALID_CONTENT_TYPE",
                     "invalid content type".to_string(),
+                    Some(json!({
+                        "field": "content_type",
+                    })),
                 ),
                 DomainError::InvalidContentId(_) => (
                     StatusCode::BAD_REQUEST,
-                    "INVALID_REQUEST",
+                    "INVALID_CONTENT_ID",
                     "invalid content id".to_string(),
+                    Some(json!({
+                        "field": "content_id",
+                    })),
                 ),
                 DomainError::InvalidUserId(_) => (
                     StatusCode::BAD_REQUEST,
-                    "INVALID_REQUEST",
+                    "INVALID_USER_ID",
                     "invalid user id".to_string(),
+                    Some(json!({
+                        "field": "user_id",
+                    })),
                 ),
             },
             Self::ContentValidation(error) => match error {
-                ContentValidationError::ContentTypeUnknown(_) => (
+                ContentValidationError::ContentTypeUnknown(content_type) => (
                     StatusCode::BAD_REQUEST,
                     "CONTENT_TYPE_UNKNOWN",
                     "content type unknown".to_string(),
+                    Some(json!({
+                        "content_type": content_type,
+                    })),
                 ),
-                ContentValidationError::ContentNotFound { .. } => (
+                ContentValidationError::ContentNotFound {
+                    content_type,
+                    content_id,
+                } => (
                     StatusCode::NOT_FOUND,
                     "CONTENT_NOT_FOUND",
                     "content not found".to_string(),
+                    Some(json!({
+                        "content_type": content_type,
+                        "content_id": content_id,
+                    })),
                 ),
                 ContentValidationError::DependencyUnavailable(_) => (
                     StatusCode::SERVICE_UNAVAILABLE,
                     "DEPENDENCY_UNAVAILABLE",
                     "dependency unavailable".to_string(),
+                    None,
                 ),
                 ContentValidationError::NetworkError(_) => (
                     StatusCode::SERVICE_UNAVAILABLE,
                     "DEPENDENCY_UNAVAILABLE",
                     "dependency unavailable".to_string(),
+                    None,
                 ),
             },
             Self::Database(_) | Self::Cache(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
                 "internal error".to_string(),
+                None,
             ),
         }
     }
@@ -285,4 +321,8 @@ struct HttpErrorBody {
 struct HttpErrorDetail {
     code: &'static str,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<Value>,
 }

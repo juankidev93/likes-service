@@ -1,9 +1,11 @@
 use axum::{
+    body::{to_bytes, Body},
     extract::{MatchedPath, Request},
-    http::{header::HeaderName, HeaderValue},
+    http::{header, header::HeaderName, HeaderValue},
     middleware::Next,
     response::Response,
 };
+use serde_json::Value;
 use std::time::Instant;
 use tracing::info;
 use uuid::Uuid;
@@ -72,6 +74,8 @@ pub async fn request_logging_middleware(mut request: Request, next: Next) -> Res
         HeaderValue::from_str(&request_id).expect("request_id must be a valid header value"),
     );
 
+    response = inject_request_id_into_error_body(response, &request_id).await;
+
     record_http_request(&method, &path, status, latency_seconds);
 
     match (status >= 500, user_id.as_deref(), error_context) {
@@ -122,4 +126,47 @@ pub async fn request_logging_middleware(mut request: Request, next: Next) -> Res
     };
 
     response
+}
+
+async fn inject_request_id_into_error_body(response: Response, request_id: &str) -> Response {
+    if !(response.status().is_client_error() || response.status().is_server_error()) {
+        return response;
+    }
+
+    let is_json = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/json"));
+
+    if !is_json {
+        return response;
+    }
+
+    let (parts, body) = response.into_parts();
+    let body_bytes = match to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(_) => return Response::from_parts(parts, Body::empty()),
+    };
+
+    let mut body_value = match serde_json::from_slice::<Value>(&body_bytes) {
+        Ok(value) => value,
+        Err(_) => return Response::from_parts(parts, Body::from(body_bytes)),
+    };
+
+    let Some(error_object) = body_value.get_mut("error").and_then(Value::as_object_mut) else {
+        return Response::from_parts(parts, Body::from(body_bytes));
+    };
+
+    error_object.insert(
+        "request_id".to_string(),
+        Value::String(request_id.to_string()),
+    );
+
+    let encoded_body = match serde_json::to_vec(&body_value) {
+        Ok(body) => body,
+        Err(_) => return Response::from_parts(parts, Body::from(body_bytes)),
+    };
+
+    Response::from_parts(parts, Body::from(encoded_body))
 }

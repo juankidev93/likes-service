@@ -36,6 +36,8 @@ async fn create_like_without_token_returns_401() {
 
     let body: Value = response.json().await.expect("response must be valid json");
     assert_eq!(body["error"]["code"], "UNAUTHORIZED");
+    assert!(body["error"]["request_id"].as_str().is_some());
+    assert!(body["error"].get("details").is_none());
 
     server.shutdown().await;
 }
@@ -61,6 +63,12 @@ async fn create_like_with_unknown_content_returns_404() {
 
     let body: Value = response.json().await.expect("response must be valid json");
     assert_eq!(body["error"]["code"], "CONTENT_NOT_FOUND");
+    assert!(body["error"]["request_id"].as_str().is_some());
+    assert_eq!(body["error"]["details"]["content_type"], "post");
+    assert_eq!(
+        body["error"]["details"]["content_id"],
+        "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    );
 
     server.shutdown().await;
 }
