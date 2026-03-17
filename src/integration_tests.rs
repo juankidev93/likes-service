@@ -349,6 +349,108 @@ async fn count_falls_back_to_postgres_when_redis_is_unavailable() {
     server.shutdown().await;
 }
 
+#[tokio::test]
+#[serial]
+async fn sse_metrics_track_connections_and_events() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    create_like(
+        &server,
+        "valid-alice-token",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+
+    let response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/stream?window=all&limit=5",
+            server.base_url
+        ))
+        .send()
+        .await
+        .expect("stream request must succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut response = response;
+    let first_chunk = tokio::time::timeout(Duration::from_secs(2), async {
+        response.chunk().await
+    })
+    .await
+    .expect("stream should emit quickly")
+    .expect("chunk read should succeed")
+    .expect("stream should emit at least one chunk");
+
+    let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
+    assert!(chunk.contains("event: snapshot"));
+
+    let metrics_while_open = server
+        .client
+        .get(format!("{}/metrics", server.base_url))
+        .send()
+        .await
+        .expect("metrics request must succeed")
+        .text()
+        .await
+        .expect("metrics body must be readable");
+
+    assert!(
+        metric_value(
+            &metrics_while_open,
+            "social_api_sse_connections_total",
+            &[("stream", "top_likes")],
+        ) >= 1.0
+    );
+    assert_eq!(
+        metric_value(
+            &metrics_while_open,
+            "social_api_sse_connections_active",
+            &[("stream", "top_likes")],
+        ),
+        1.0
+    );
+    assert!(
+        metric_value(
+            &metrics_while_open,
+            "social_api_sse_events_sent_total",
+            &[("stream", "top_likes"), ("event", "snapshot")],
+        ) >= 1.0
+    );
+
+    drop(response);
+    sleep(Duration::from_millis(50)).await;
+
+    let metrics_after_close = server
+        .client
+        .get(format!("{}/metrics", server.base_url))
+        .send()
+        .await
+        .expect("metrics request must succeed")
+        .text()
+        .await
+        .expect("metrics body must be readable");
+
+    assert_eq!(
+        metric_value(
+            &metrics_after_close,
+            "social_api_sse_connections_active",
+            &[("stream", "top_likes")],
+        ),
+        0.0
+    );
+    assert!(
+        metric_value(
+            &metrics_after_close,
+            "social_api_sse_disconnects_total",
+            &[("stream", "top_likes")],
+        ) >= 1.0
+    );
+
+    server.shutdown().await;
+}
+
 struct TestServer {
     base_url: String,
     client: reqwest::Client,
@@ -516,6 +618,26 @@ async fn create_like(server: &TestServer, token: &str, content_type: &str, conte
         "unexpected like response status: {}",
         response.status()
     );
+}
+
+fn metric_value(metrics_body: &str, metric_name: &str, labels: &[(&str, &str)]) -> f64 {
+    metrics_body
+        .lines()
+        .find_map(|line| {
+            if !line.starts_with(metric_name) {
+                return None;
+            }
+
+            if !labels
+                .iter()
+                .all(|(key, value)| line.contains(&format!("{key}=\"{value}\"")))
+            {
+                return None;
+            }
+
+            line.split_whitespace().last()?.parse::<f64>().ok()
+        })
+        .unwrap_or_else(|| panic!("metric {metric_name} with labels {:?} not found", labels))
 }
 
 async fn insert_like_directly(
