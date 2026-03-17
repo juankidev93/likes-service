@@ -17,6 +17,8 @@ mod mock_profile_api;
 mod profile_api_client;
 mod rate_limit;
 mod use_cases;
+#[cfg(test)]
+mod integration_tests;
 
 use bootstrap::{build_app, build_app_state};
 use config::ServiceConfig;

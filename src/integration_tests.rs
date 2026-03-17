@@ -1,0 +1,327 @@
+use crate::bootstrap::{build_app, build_app_state};
+use crate::config::ServiceConfig;
+use crate::logging::init_tracing;
+use crate::metrics::init_metrics;
+use reqwest::StatusCode;
+use serde_json::{json, Value};
+use serial_test::serial;
+use sqlx::postgres::PgPoolOptions;
+use std::env;
+use std::net::SocketAddr;
+use std::sync::Once;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tokio::time::{sleep, Duration};
+
+static TEST_INIT: Once = Once::new();
+
+#[tokio::test]
+#[serial]
+async fn create_like_without_token_returns_401() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    let response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+        }))
+        .send()
+        .await
+        .expect("request must succeed");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let body: Value = response.json().await.expect("response must be valid json");
+    assert_eq!(body["error"]["code"], "UNAUTHORIZED");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn create_like_with_unknown_content_returns_404() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    let response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        }))
+        .send()
+        .await
+        .expect("request must succeed");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let body: Value = response.json().await.expect("response must be valid json");
+    assert_eq!(body["error"]["code"], "CONTENT_NOT_FOUND");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn like_then_count_returns_updated_value() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    let create_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+        }))
+        .send()
+        .await
+        .expect("create request must succeed");
+
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+
+    let count_response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/post/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1/count",
+            server.base_url
+        ))
+        .send()
+        .await
+        .expect("count request must succeed");
+
+    assert_eq!(count_response.status(), StatusCode::OK);
+
+    let body: Value = count_response.json().await.expect("response must be valid json");
+    assert_eq!(body["count"], 1);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn write_rate_limit_returns_429_when_exceeded() {
+    let server = TestServer::spawn(|config| {
+        config.write_rate_limit_per_minute = 1;
+    })
+    .await;
+
+    let first_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+        }))
+        .send()
+        .await
+        .expect("first request must succeed");
+
+    assert_eq!(first_response.status(), StatusCode::CREATED);
+
+    let second_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+        }))
+        .send()
+        .await
+        .expect("second request must succeed");
+
+    assert_eq!(second_response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    let body: Value = second_response.json().await.expect("response must be valid json");
+    assert_eq!(body["error"]["code"], "RATE_LIMITED");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn profile_api_circuit_breaker_opens_and_rejects_following_requests() {
+    let server = TestServer::spawn(|config| {
+        config.profile_api_base_url = "http://127.0.0.1:9".to_string();
+        config.circuit_breaker_failure_threshold = 1;
+        config.circuit_breaker_open_seconds = 60;
+    })
+    .await;
+
+    let first_response = server
+        .client
+        .get(format!("{}/v1/likes/user", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .send()
+        .await
+        .expect("first request must succeed");
+
+    assert_eq!(first_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let second_response = server
+        .client
+        .get(format!("{}/v1/likes/user", server.base_url))
+        .bearer_auth("valid-alice-token")
+        .send()
+        .await
+        .expect("second request must succeed");
+
+    assert_eq!(second_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let metrics_response = server
+        .client
+        .get(format!("{}/metrics", server.base_url))
+        .send()
+        .await
+        .expect("metrics request must succeed");
+
+    let metrics_body = metrics_response
+        .text()
+        .await
+        .expect("metrics body must be readable");
+
+    assert!(metrics_body.contains(
+        "social_api_circuit_breaker_open_total{service=\"profile_api\"}"
+    ));
+    assert!(metrics_body.contains(
+        "social_api_circuit_breaker_rejected_total{service=\"profile_api\"}"
+    ));
+    assert!(metrics_body.contains("social_api_external_calls_total"));
+    assert!(metrics_body.contains("service=\"profile_api\""));
+    assert!(metrics_body.contains("status=\"circuit_open\""));
+
+    server.shutdown().await;
+}
+
+struct TestServer {
+    base_url: String,
+    client: reqwest::Client,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    server_handle: JoinHandle<()>,
+    database_url: String,
+    redis_url: String,
+}
+
+impl TestServer {
+    async fn spawn(override_config: impl FnOnce(&mut ServiceConfig)) -> Self {
+        init_test_runtime();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener must bind");
+        let address = listener.local_addr().expect("listener must expose address");
+        let base_url = format!("http://{}", address);
+
+        let mut config = base_test_config(address);
+        override_config(&mut config);
+
+        cleanup_database(&config.database_url).await;
+        cleanup_redis(&config.redis_url).await;
+
+        let app_state = build_app_state(&config).await;
+        let app = build_app(app_state);
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_handle = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .expect("test server must run");
+        });
+
+        sleep(Duration::from_millis(50)).await;
+
+        Self {
+            base_url,
+            client: reqwest::Client::new(),
+            shutdown_tx: Some(shutdown_tx),
+            server_handle,
+            database_url: config.database_url,
+            redis_url: config.redis_url,
+        }
+    }
+
+    async fn shutdown(mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+
+        self.server_handle
+            .await
+            .expect("test server task must finish cleanly");
+
+        cleanup_database(&self.database_url).await;
+        cleanup_redis(&self.redis_url).await;
+    }
+}
+
+fn init_test_runtime() {
+    TEST_INIT.call_once(|| {
+        init_tracing();
+        init_metrics();
+    });
+}
+
+fn base_test_config(address: SocketAddr) -> ServiceConfig {
+    ServiceConfig {
+        host: "127.0.0.1".to_string(),
+        port: address.port(),
+        database_url: env::var("DATABASE_URL").expect("DATABASE_URL must be set for tests"),
+        redis_url: env::var("REDIS_URL").expect("REDIS_URL must be set for tests"),
+        write_rate_limit_per_minute: 30,
+        read_rate_limit_per_minute: 1000,
+        circuit_breaker_failure_threshold: 3,
+        circuit_breaker_open_seconds: 30,
+        profile_api_base_url: format!("http://{}", address),
+        post_content_api_base_url: format!("http://{}", address),
+        bonus_hunter_content_api_base_url: format!("http://{}", address),
+        top_picks_content_api_base_url: format!("http://{}", address),
+    }
+}
+
+async fn cleanup_database(database_url: &str) {
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database_url)
+        .await
+        .expect("test database connection must work");
+
+    sqlx::query("TRUNCATE likes, like_counts")
+        .execute(&pool)
+        .await
+        .expect("test database cleanup must succeed");
+}
+
+async fn cleanup_redis(redis_url: &str) {
+    let client = redis::Client::open(redis_url).expect("test redis url must be valid");
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("test redis connection must work");
+
+    for pattern in ["likes:*", "rate_limit:*"] {
+        let keys: Vec<String> = redis::cmd("KEYS")
+            .arg(pattern)
+            .query_async(&mut connection)
+            .await
+            .expect("redis KEYS must succeed");
+
+        if !keys.is_empty() {
+            let _: i64 = redis::cmd("DEL")
+                .arg(keys)
+                .query_async(&mut connection)
+                .await
+                .expect("redis DEL must succeed");
+        }
+    }
+}
