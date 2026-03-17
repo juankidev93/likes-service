@@ -20,104 +20,77 @@ pub struct ServiceConfig {
 
 impl ServiceConfig {
     pub fn from_env() -> Result<Self, String> {
-        let host = get_optional_string("SERVICE_HOST", &["HOST"])
-            .unwrap_or_else(|| "127.0.0.1".to_string());
-        let port = get_optional_parsed::<u16>("SERVICE_PORT", &["PORT"])?.unwrap_or(3000);
+        let host = env::var("SERVICE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = get_optional_parsed::<u16>("HTTP_PORT")?.unwrap_or(3000);
 
         if host.trim().is_empty() {
             return Err("SERVICE_HOST cannot be empty".to_string());
         }
 
-        let database_url = get_required_string(
-            "DATABASE_URL",
-            &["WRITE_DATABASE_URL", "READ_DATABASE_URL"],
-        )?;
+        let database_url = get_required_string("DATABASE_URL")?;
 
         if database_url.trim().is_empty() {
             return Err("DATABASE_URL cannot be empty".to_string());
         }
 
-        let redis_url = get_required_string("REDIS_URL", &["CACHE_REDIS_URL"])?;
+        let redis_url = get_required_string("REDIS_URL")?;
 
         if redis_url.trim().is_empty() {
             return Err("REDIS_URL cannot be empty".to_string());
         }
 
-        let write_rate_limit_per_minute = get_optional_parsed::<u32>(
-            "WRITE_RATE_LIMIT_PER_MINUTE",
-            &["RATE_LIMIT_WRITE_PER_MINUTE"],
-        )?
+        let write_rate_limit_per_minute = get_optional_parsed::<u32>("RATE_LIMIT_WRITE_PER_MINUTE")?
         .unwrap_or(30);
 
-        let read_rate_limit_per_minute = get_optional_parsed::<u32>(
-            "READ_RATE_LIMIT_PER_MINUTE",
-            &["RATE_LIMIT_READ_PER_MINUTE"],
-        )?
+        let read_rate_limit_per_minute = get_optional_parsed::<u32>("RATE_LIMIT_READ_PER_MINUTE")?
         .unwrap_or(1000);
 
-        let cache_ttl_content_validation_seconds = get_optional_parsed::<u64>(
-            "CACHE_TTL_CONTENT_VALIDATION_SECONDS",
-            &["CONTENT_VALIDATION_CACHE_TTL_SECONDS"],
-        )?
+        let cache_ttl_content_validation_seconds =
+            get_optional_parsed::<u64>("CACHE_TTL_CONTENT_VALIDATION_SECS")?
         .unwrap_or(3600);
 
-        let circuit_breaker_failure_threshold = get_optional_parsed::<u32>(
-            "CIRCUIT_BREAKER_FAILURE_THRESHOLD",
-            &[],
-        )?
-        .unwrap_or(3);
+        let circuit_breaker_failure_threshold =
+            get_optional_parsed::<u32>("CIRCUIT_BREAKER_FAILURE_THRESHOLD")?.unwrap_or(3);
 
-        let circuit_breaker_open_seconds = get_optional_parsed::<u64>(
-            "CIRCUIT_BREAKER_OPEN_SECONDS",
-            &[],
-        )?
-        .unwrap_or(30);
+        let circuit_breaker_open_seconds =
+            get_optional_parsed::<u64>("CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECS")?.unwrap_or(30);
 
-        let circuit_breaker_success_threshold = get_optional_parsed::<u32>(
-            "CIRCUIT_BREAKER_SUCCESS_THRESHOLD",
-            &[],
-        )?
-        .unwrap_or(3);
+        let circuit_breaker_success_threshold =
+            get_optional_parsed::<u32>("CIRCUIT_BREAKER_SUCCESS_THRESHOLD")?.unwrap_or(3);
 
-        let circuit_breaker_failure_window_seconds = get_optional_parsed::<u64>(
-            "CIRCUIT_BREAKER_FAILURE_WINDOW_SECONDS",
-            &[],
-        )?
-        .unwrap_or(30);
+        let circuit_breaker_failure_window_seconds =
+            get_optional_parsed::<u64>("CIRCUIT_BREAKER_FAILURE_WINDOW_SECONDS")?.unwrap_or(30);
 
-        let profile_api_base_url = get_optional_string("PROFILE_API_BASE_URL", &["PROFILE_API_URL"])
+        let profile_api_base_url = get_optional_string("PROFILE_API_URL")
             .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
 
         if profile_api_base_url.trim().is_empty() {
-            return Err("PROFILE_API_BASE_URL cannot be empty".to_string());
+            return Err("PROFILE_API_URL cannot be empty".to_string());
         }
 
-        let post_content_api_base_url = get_optional_string(
-            "POST_CONTENT_API_BASE_URL",
-            &["POST_CONTENT_API_URL"],
-        )
-        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
-        let bonus_hunter_content_api_base_url = get_optional_string(
-            "BONUS_HUNTER_CONTENT_API_BASE_URL",
-            &["BONUS_HUNTER_CONTENT_API_URL"],
-        )
-        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
-        let top_picks_content_api_base_url = get_optional_string(
-            "TOP_PICKS_CONTENT_API_BASE_URL",
-            &["TOP_PICKS_CONTENT_API_URL"],
-        )
-        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
+        let post_content_api_base_url =
+            get_optional_string("CONTENT_API_POST_URL").unwrap_or_else(|| {
+                format!("http://127.0.0.1:{port}")
+            });
+        let bonus_hunter_content_api_base_url =
+            get_optional_string("CONTENT_API_BONUS_HUNTER_URL").unwrap_or_else(|| {
+                format!("http://127.0.0.1:{port}")
+            });
+        let top_picks_content_api_base_url =
+            get_optional_string("CONTENT_API_TOP_PICKS_URL").unwrap_or_else(|| {
+                format!("http://127.0.0.1:{port}")
+            });
 
         if post_content_api_base_url.trim().is_empty() {
-            return Err("POST_CONTENT_API_BASE_URL cannot be empty".to_string());
+            return Err("CONTENT_API_POST_URL cannot be empty".to_string());
         }
 
         if bonus_hunter_content_api_base_url.trim().is_empty() {
-            return Err("BONUS_HUNTER_CONTENT_API_BASE_URL cannot be empty".to_string());
+            return Err("CONTENT_API_BONUS_HUNTER_URL cannot be empty".to_string());
         }
 
         if top_picks_content_api_base_url.trim().is_empty() {
-            return Err("TOP_PICKS_CONTENT_API_BASE_URL cannot be empty".to_string());
+            return Err("CONTENT_API_TOP_PICKS_URL cannot be empty".to_string());
         }
 
         Ok(Self {
@@ -144,24 +117,20 @@ impl ServiceConfig {
     }
 }
 
-fn get_required_string(primary: &str, aliases: &[&str]) -> Result<String, String> {
-    get_optional_string(primary, aliases)
+fn get_required_string(primary: &str) -> Result<String, String> {
+    get_optional_string(primary)
         .ok_or_else(|| format!("{primary} is required"))
 }
 
-fn get_optional_string(primary: &str, aliases: &[&str]) -> Option<String> {
-    env::var(primary).ok().or_else(|| {
-        aliases
-            .iter()
-            .find_map(|alias| env::var(alias).ok())
-    })
+fn get_optional_string(primary: &str) -> Option<String> {
+    env::var(primary).ok()
 }
 
-fn get_optional_parsed<T>(primary: &str, aliases: &[&str]) -> Result<Option<T>, String>
+fn get_optional_parsed<T>(primary: &str) -> Result<Option<T>, String>
 where
     T: std::str::FromStr,
 {
-    match get_optional_string(primary, aliases) {
+    match get_optional_string(primary) {
         Some(value) => value
             .parse::<T>()
             .map(Some)

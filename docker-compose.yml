@@ -38,13 +38,13 @@ services:
         condition: service_healthy
     environment:
       SERVICE_HOST: 0.0.0.0
-      SERVICE_PORT: 3000
+      HTTP_PORT: 3000
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/likes_service
       REDIS_URL: redis://redis:6379/
-      PROFILE_API_BASE_URL: http://app:3000
-      POST_CONTENT_API_BASE_URL: http://app:3000
-      BONUS_HUNTER_CONTENT_API_BASE_URL: http://app:3000
-      TOP_PICKS_CONTENT_API_BASE_URL: http://app:3000
+      PROFILE_API_URL: http://app:3000
+      CONTENT_API_POST_URL: http://app:3000
+      CONTENT_API_BONUS_HUNTER_URL: http://app:3000
+      CONTENT_API_TOP_PICKS_URL: http://app:3000
     ports:
       - "3000:3000"
 
