@@ -64,6 +64,17 @@ static EXTERNAL_CALL_DURATION_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
     .expect("external call histogram must be valid")
 });
 
+static LIKES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_likes_total",
+            "Total number of effective like and unlike operations",
+        ),
+        &["content_type", "operation"],
+    )
+    .expect("likes total counter must be valid")
+});
+
 pub fn init_metrics() {
     REGISTRY
         .register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
@@ -80,6 +91,9 @@ pub fn init_metrics() {
     REGISTRY
         .register(Box::new(EXTERNAL_CALL_DURATION_SECONDS.clone()))
         .expect("external call histogram must register");
+    REGISTRY
+        .register(Box::new(LIKES_TOTAL.clone()))
+        .expect("likes total counter must register");
 }
 
 pub fn record_http_request(method: &str, path: &str, status: u16, latency_seconds: f64) {
@@ -106,6 +120,12 @@ pub fn record_external_call(service: &str, method: &str, status: &str, latency_s
     EXTERNAL_CALL_DURATION_SECONDS
         .with_label_values(&[service, method])
         .observe(latency_seconds);
+}
+
+pub fn record_like_operation(content_type: &str, operation: &str) {
+    LIKES_TOTAL
+        .with_label_values(&[content_type, operation])
+        .inc();
 }
 
 pub async fn metrics_handler() -> Response {

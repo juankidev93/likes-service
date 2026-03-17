@@ -6,6 +6,7 @@ use crate::error::AppError;
 use crate::likes_repository::{
     DeleteLikeResult, InsertLikeResult, PostgresLikesRepository,
 };
+use crate::metrics::record_like_operation;
 use redis::{AsyncCommands, Client as RedisClient};
 
 const LIKE_COUNT_CACHE_TTL_SECONDS: u64 = 60;
@@ -45,6 +46,7 @@ impl<'a> LikesUseCases<'a> {
         let already_existed = match result {
             InsertLikeResult::Inserted => {
                 self.increment_cached_like_count(content_type, content_id).await?;
+                record_like_operation(content_type.as_str(), "like");
                 false
             }
             InsertLikeResult::AlreadyExists => true,
@@ -81,6 +83,7 @@ impl<'a> LikesUseCases<'a> {
             DeleteLikeResult::Deleted => {
                 self.decrement_cached_like_count(content_type, content_id)
                     .await?;
+                record_like_operation(content_type.as_str(), "unlike");
                 true
             }
             DeleteLikeResult::NotFound => false,
