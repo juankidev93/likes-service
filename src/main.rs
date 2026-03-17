@@ -32,11 +32,12 @@ use metrics::{init_metrics, metrics_handler};
 use mock_content_api::{build_mock_content_store, get_content};
 use mock_profile_api::validate_token;
 use profile_api_client::ProfileApiClient;
-use rate_limit::require_write_auth_and_rate_limit;
+use rate_limit::{require_read_rate_limit, require_write_auth_and_rate_limit};
 use redis::AsyncCommands;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 #[tokio::main]
@@ -126,6 +127,7 @@ async fn main() {
         db_pool,
         redis_client,
         write_rate_limit_per_minute: config.write_rate_limit_per_minute,
+        read_rate_limit_per_minute: config.read_rate_limit_per_minute,
         mock_profiles,
         mock_content_store,
         content_type_registry,
@@ -153,17 +155,24 @@ async fn main() {
             require_auth,
         ));
 
+    let public_read_routes = Router::new()
+        .route("/v1/likes/batch/counts", post(get_like_counts_batch))
+        .route(
+            "/v1/likes/{content_type}/{content_id}/count",
+            get(get_like_count),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            require_read_rate_limit,
+        ));
+
     let app = Router::new()
         .route("/health/live", get(live_health))
         .route("/health/ready", get(ready_health))
         .route("/metrics", get(metrics_handler))
         .route("/v1/auth/validate", get(validate_token))
         .route("/v1/{content_type}/{content_id}", get(get_content))
-        .route("/v1/likes/batch/counts", post(get_like_counts_batch))
-        .route(
-            "/v1/likes/{content_type}/{content_id}/count",
-            get(get_like_count),
-        )
+        .merge(public_read_routes)
         .merge(authenticated_write_routes)
         .merge(authenticated_read_routes)
         .with_state(app_state)
@@ -173,7 +182,10 @@ async fn main() {
         .await
         .expect("failed to bind TCP listener");
 
-    axum::serve(listener, app)
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
         .await
         .expect("HTTP server failed");
 }

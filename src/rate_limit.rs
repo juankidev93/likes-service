@@ -2,11 +2,12 @@ use crate::app_state::AppState;
 use crate::auth_middleware::authenticate_headers;
 use crate::error::{set_rate_limit_headers, AppError};
 use axum::{
-    extract::Request,
+    extract::{ConnectInfo, Request},
     middleware::Next,
     response::Response,
 };
 use redis::AsyncCommands;
+use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
@@ -21,18 +22,11 @@ pub async fn require_write_auth_and_rate_limit(
     };
 
     let now_seconds = current_unix_timestamp();
-    let window_seconds = 60_u64;
-    let window_start = now_seconds / window_seconds;
-    let reset_epoch_seconds = (window_start + 1) * window_seconds;
-    let retry_after_seconds = reset_epoch_seconds.saturating_sub(now_seconds);
     let limit = state.write_rate_limit_per_minute;
-    let key = format!(
-        "rate_limit:write:{}:{}",
-        authenticated_user.user_id, window_start
-    );
+    let (key, reset_epoch_seconds, retry_after_seconds) =
+        rate_limit_window_key("write", &authenticated_user.user_id, now_seconds);
 
-    let rate_limit_state = match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await
-    {
+    let rate_limit_state = match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
         Ok(state) => state,
         Err(error) => {
             warn!(error = %error, "redis unavailable for write rate limiting, allowing request");
@@ -66,6 +60,49 @@ pub async fn require_write_auth_and_rate_limit(
     response
 }
 
+pub async fn require_read_rate_limit(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let now_seconds = current_unix_timestamp();
+    let limit = state.read_rate_limit_per_minute;
+    let client_ip = client_ip(&request);
+    let (key, reset_epoch_seconds, retry_after_seconds) =
+        rate_limit_window_key("read", &client_ip, now_seconds);
+
+    let rate_limit_state = match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
+        Ok(state) => state,
+        Err(error) => {
+            warn!(error = %error, "redis unavailable for read rate limiting, allowing request");
+            return next.run(request).await;
+        }
+    };
+
+    let remaining = limit.saturating_sub(rate_limit_state.current);
+
+    if rate_limit_state.current > limit {
+        return AppError::rate_limited(
+            "RATE_LIMITED",
+            "rate limit exceeded",
+            limit,
+            0,
+            reset_epoch_seconds,
+            retry_after_seconds,
+        );
+    }
+
+    let mut response = next.run(request).await;
+    set_rate_limit_headers(
+        &mut response,
+        limit,
+        remaining,
+        reset_epoch_seconds,
+        None,
+    );
+    response
+}
+
 async fn increment_and_read_rate_limit(
     state: &AppState,
     key: &str,
@@ -86,6 +123,45 @@ fn current_unix_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("system time must be after unix epoch")
         .as_secs()
+}
+
+fn rate_limit_window_key(scope: &str, subject: &str, now_seconds: u64) -> (String, u64, u64) {
+    let window_seconds = 60_u64;
+    let window_start = now_seconds / window_seconds;
+    let reset_epoch_seconds = (window_start + 1) * window_seconds;
+    let retry_after_seconds = reset_epoch_seconds.saturating_sub(now_seconds);
+    let key = format!("rate_limit:{scope}:{subject}:{window_start}");
+
+    (key, reset_epoch_seconds, retry_after_seconds)
+}
+
+fn client_ip(request: &Request) -> String {
+    if let Some(value) = request.headers().get("x-forwarded-for")
+        && let Ok(value) = value.to_str()
+        && let Some(ip) = value.split(',').next()
+    {
+        let ip = ip.trim();
+
+        if !ip.is_empty() {
+            return ip.to_string();
+        }
+    }
+
+    if let Some(value) = request.headers().get("x-real-ip")
+        && let Ok(value) = value.to_str()
+    {
+        let ip = value.trim();
+
+        if !ip.is_empty() {
+            return ip.to_string();
+        }
+    }
+
+    if let Some(ConnectInfo(addr)) = request.extensions().get::<ConnectInfo<SocketAddr>>() {
+        return addr.ip().to_string();
+    }
+
+    "unknown".to_string()
 }
 
 struct RateLimitState {

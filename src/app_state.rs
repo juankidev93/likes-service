@@ -12,6 +12,7 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub redis_client: RedisClient,
     pub write_rate_limit_per_minute: u32,
+    pub read_rate_limit_per_minute: u32,
     pub mock_profiles: HashMap<String, MockProfile>,
     pub mock_content_store: HashMap<String, HashSet<String>>,
     pub content_type_registry: ContentTypeRegistry,
