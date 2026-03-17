@@ -42,6 +42,28 @@ static CACHE_OPERATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     .expect("cache operations counter must be valid")
 });
 
+static EXTERNAL_CALLS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_external_calls_total",
+            "Total number of external service calls",
+        ),
+        &["service", "method", "status"],
+    )
+    .expect("external calls counter must be valid")
+});
+
+static EXTERNAL_CALL_DURATION_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    HistogramVec::new(
+        HistogramOpts::new(
+            "social_api_external_call_duration_seconds",
+            "External service call duration in seconds",
+        ),
+        &["service", "method"],
+    )
+    .expect("external call histogram must be valid")
+});
+
 pub fn init_metrics() {
     REGISTRY
         .register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
@@ -52,6 +74,12 @@ pub fn init_metrics() {
     REGISTRY
         .register(Box::new(CACHE_OPERATIONS_TOTAL.clone()))
         .expect("cache operations counter must register");
+    REGISTRY
+        .register(Box::new(EXTERNAL_CALLS_TOTAL.clone()))
+        .expect("external calls counter must register");
+    REGISTRY
+        .register(Box::new(EXTERNAL_CALL_DURATION_SECONDS.clone()))
+        .expect("external call histogram must register");
 }
 
 pub fn record_http_request(method: &str, path: &str, status: u16, latency_seconds: f64) {
@@ -69,6 +97,15 @@ pub fn record_cache_operation(operation: &str, result: &str) {
     CACHE_OPERATIONS_TOTAL
         .with_label_values(&[operation, result])
         .inc();
+}
+
+pub fn record_external_call(service: &str, method: &str, status: &str, latency_seconds: f64) {
+    EXTERNAL_CALLS_TOTAL
+        .with_label_values(&[service, method, status])
+        .inc();
+    EXTERNAL_CALL_DURATION_SECONDS
+        .with_label_values(&[service, method])
+        .observe(latency_seconds);
 }
 
 pub async fn metrics_handler() -> Response {

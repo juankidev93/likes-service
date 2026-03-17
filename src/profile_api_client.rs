@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
+use crate::metrics::record_external_call;
 use reqwest::{header, Client, StatusCode};
 use serde::Deserialize;
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, time::Instant};
 
 #[derive(Clone)]
 pub struct ProfileApiClient {
@@ -22,15 +23,36 @@ impl ProfileApiClient {
         &self,
         bearer_token: &str,
     ) -> Result<AuthenticatedUser, AuthError> {
+        let start = Instant::now();
         let response = self
             .http_client
             .get(format!("{}/v1/auth/validate", self.base_url))
             .header(header::AUTHORIZATION, format!("Bearer {bearer_token}"))
             .send()
-            .await
-            .map_err(|error| AuthError::NetworkError(error.to_string()))?;
+            .await;
 
-        match response.status() {
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                record_external_call(
+                    "profile_api",
+                    "GET /v1/auth/validate",
+                    "network_error",
+                    start.elapsed().as_secs_f64(),
+                );
+                return Err(AuthError::NetworkError(error.to_string()));
+            }
+        };
+
+        let status = response.status();
+        record_external_call(
+            "profile_api",
+            "GET /v1/auth/validate",
+            status.as_str(),
+            start.elapsed().as_secs_f64(),
+        );
+
+        match status {
             StatusCode::OK => response
                 .json::<ValidateTokenResponse>()
                 .await
@@ -44,15 +66,36 @@ impl ProfileApiClient {
     }
 
     pub async fn check_availability(&self) -> Result<(), AuthError> {
+        let start = Instant::now();
         let response = self
             .http_client
             .get(format!("{}/v1/auth/validate", self.base_url))
             .header(header::AUTHORIZATION, "Bearer readiness-check-token")
             .send()
-            .await
-            .map_err(|error| AuthError::NetworkError(error.to_string()))?;
+            .await;
 
-        match response.status() {
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                record_external_call(
+                    "profile_api",
+                    "GET /v1/auth/validate",
+                    "network_error",
+                    start.elapsed().as_secs_f64(),
+                );
+                return Err(AuthError::NetworkError(error.to_string()));
+            }
+        };
+
+        let status = response.status();
+        record_external_call(
+            "profile_api",
+            "GET /v1/auth/validate",
+            status.as_str(),
+            start.elapsed().as_secs_f64(),
+        );
+
+        match status {
             StatusCode::OK | StatusCode::UNAUTHORIZED => Ok(()),
             status => Err(AuthError::DependencyUnavailable(format!(
                 "unexpected profile api status: {status}"

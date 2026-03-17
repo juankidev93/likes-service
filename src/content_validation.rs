@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
 use crate::content_registry::ContentTypeRegistry;
+use crate::metrics::record_external_call;
 use reqwest::{Client, StatusCode};
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, time::Instant};
 
 #[derive(Clone)]
 pub struct ContentValidationClient {
@@ -35,14 +36,35 @@ impl ContentValidationClient {
             content_id
         );
 
+        let start = Instant::now();
         let response = self
             .http_client
             .get(url)
             .send()
-            .await
-            .map_err(|error| ContentValidationError::NetworkError(error.to_string()))?;
+            .await;
 
-        match response.status() {
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                record_external_call(
+                    "content_api",
+                    "GET /v1/{content_type}/{content_id}",
+                    "network_error",
+                    start.elapsed().as_secs_f64(),
+                );
+                return Err(ContentValidationError::NetworkError(error.to_string()));
+            }
+        };
+
+        let status = response.status();
+        record_external_call(
+            "content_api",
+            "GET /v1/{content_type}/{content_id}",
+            status.as_str(),
+            start.elapsed().as_secs_f64(),
+        );
+
+        match status {
             StatusCode::OK => Ok(()),
             StatusCode::NOT_FOUND => Err(ContentValidationError::ContentNotFound {
                 content_type: content_type.to_string(),
