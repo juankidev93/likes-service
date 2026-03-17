@@ -34,6 +34,9 @@ docker compose down -v
 docker compose up --build
 ```
 
+The Postgres schema is created from the versioned SQL files in `migrations/`.
+The application expects those migrations to be applied before startup and only validates that the required tables exist.
+
 ## Main Environment Variables
 
 The most important variables are:
@@ -144,4 +147,4 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaa
 
 - Add retention and compaction strategy for old hourly leaderboard buckets.
 - Move health, topology, and trade-off notes into more explicit operational documentation if the service becomes long-lived.
-- Introduce stronger migration management for schema evolution beyond Docker init scripts and startup schema checks.
+- Introduce stronger migration tooling beyond Docker init scripts if the service needs a more formal deployment workflow.
