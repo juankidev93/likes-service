@@ -122,6 +122,15 @@ Open the SSE stream:
 curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'
 ```
 
+## Pagination
+
+`GET /v1/likes/user` uses cursor-based pagination rather than offset-based pagination.
+
+- The cursor is an opaque base64 value built from `liked_at` and `content_id`.
+- This fits the endpoint ordering, which is "most recent likes first".
+- Cursor pagination avoids the instability and skipped/duplicated rows that offset pagination can produce when new likes are inserted while a client is paging.
+- The trade-off is that the cursor is tied to the current sort order and should be treated as an opaque token by clients.
+
 ## Architecture Summary
 
 - Postgres is the source of truth for `likes`, `like_counts`, and hourly leaderboard aggregates.
