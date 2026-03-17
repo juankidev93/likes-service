@@ -105,6 +105,8 @@ Internal mocks used by the service itself:
 - `GET /v1/auth/validate`
 - `GET /v1/{content_type}/{content_id}`
 
+The Docker setup keeps those mock endpoints inside the main app container rather than as separate mock services. That keeps local setup small while preserving the same HTTP contracts used by the app.
+
 ## Quick Examples
 
 Create a like:
@@ -154,6 +156,7 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaa
 - Postgres is the source of truth for `likes`, `like_counts`, and hourly leaderboard aggregates.
 - Redis is used for count caching, rate limiting, and SSE event fanout through Pub/Sub.
 - Profile API and Content API are represented by internal mock endpoints so the service can be run and tested locally as a single process.
+- The container image runs as a non-root user and exposes a liveness `HEALTHCHECK` against `/health/live`.
 
 ## Trade-Offs
 

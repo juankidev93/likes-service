@@ -57,6 +57,12 @@ services:
       CONTENT_API_TOP_PICKS_URL: http://app:3000
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/health/live || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres_data:
