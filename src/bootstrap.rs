@@ -72,7 +72,7 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
         content_api_circuit_breaker,
     );
     let shutdown_signal = ShutdownSignal::new();
-    let like_events = LikeEvents::new();
+    let like_events = LikeEvents::new(redis_client.clone());
 
     AppState {
         db_pool,

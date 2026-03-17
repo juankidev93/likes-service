@@ -7,6 +7,7 @@ edition = "2024"
 async-stream = "0.3"
 axum = "0.8"
 base64 = "0.22"
+futures-util = "0.3"
 once_cell = "1"
 prometheus = "0.13"
 redis = { version = "0.32", features = ["tokio-comp"] }

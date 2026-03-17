@@ -52,13 +52,19 @@ pub(crate) async fn create_like(
     {
         Ok(result) => {
             if !result.already_existed {
-                state.like_events.publish_like(
-                    &user_id,
-                    &content_type,
-                    &content_id,
-                    result.count,
-                    result.liked_at.as_deref(),
-                );
+                if let Err(error) = state
+                    .like_events
+                    .publish_like(
+                        &user_id,
+                        &content_type,
+                        &content_id,
+                        result.count,
+                        result.liked_at.as_deref(),
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %error, "failed to publish like event");
+                }
             }
 
             let status = if result.already_existed {
@@ -106,12 +112,18 @@ pub(crate) async fn delete_like(
     {
         Ok(result) => {
             if result.was_liked {
-                state.like_events.publish_unlike(
-                    &user_id,
-                    &content_type,
-                    &content_id,
-                    result.count,
-                );
+                if let Err(error) = state
+                    .like_events
+                    .publish_unlike(
+                        &user_id,
+                        &content_type,
+                        &content_id,
+                        result.count,
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %error, "failed to publish unlike event");
+                }
             }
 
             success(Json(UnlikeResponse::from(result))).into_response()

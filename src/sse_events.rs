@@ -1,33 +1,37 @@
 use crate::domain::{ContentId, ContentType, UserId};
+use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use tokio::sync::broadcast;
-
-const LIKE_EVENTS_BUFFER: usize = 256;
 
 #[derive(Clone)]
 pub struct LikeEvents {
-    sender: broadcast::Sender<LikeEvent>,
+    redis_client: redis::Client,
 }
 
 impl LikeEvents {
-    pub fn new() -> Self {
-        let (sender, _) = broadcast::channel(LIKE_EVENTS_BUFFER);
-        Self { sender }
+    pub fn new(redis_client: redis::Client) -> Self {
+        Self { redis_client }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<LikeEvent> {
-        self.sender.subscribe()
+    pub async fn subscribe(
+        &self,
+        content_type: &ContentType,
+        content_id: &ContentId,
+    ) -> redis::RedisResult<redis::aio::PubSub> {
+        let mut pubsub = self.redis_client.get_async_pubsub().await?;
+        pubsub.subscribe(channel_name(content_type, content_id)).await?;
+        Ok(pubsub)
     }
 
-    pub fn publish_like(
+    pub async fn publish_like(
         &self,
         user_id: &UserId,
         content_type: &ContentType,
         content_id: &ContentId,
         count: i64,
         liked_at: Option<&str>,
-    ) {
-        let _ = self.sender.send(LikeEvent {
+    ) -> redis::RedisResult<()> {
+        self.publish_event(content_type, content_id, LikeEvent {
             event: "like".to_string(),
             user_id: user_id.to_string(),
             content_type: content_type.to_string(),
@@ -36,28 +40,48 @@ impl LikeEvents {
             timestamp: liked_at
                 .map(ToOwned::to_owned)
                 .unwrap_or_else(current_timestamp),
-        });
+        })
+        .await
     }
 
-    pub fn publish_unlike(
+    pub async fn publish_unlike(
         &self,
         user_id: &UserId,
         content_type: &ContentType,
         content_id: &ContentId,
         count: i64,
-    ) {
-        let _ = self.sender.send(LikeEvent {
+    ) -> redis::RedisResult<()> {
+        self.publish_event(content_type, content_id, LikeEvent {
             event: "unlike".to_string(),
             user_id: user_id.to_string(),
             content_type: content_type.to_string(),
             content_id: content_id.to_string(),
             count,
             timestamp: current_timestamp(),
-        });
+        })
+        .await
+    }
+
+    async fn publish_event(
+        &self,
+        content_type: &ContentType,
+        content_id: &ContentId,
+        event: LikeEvent,
+    ) -> redis::RedisResult<()> {
+        let payload = serde_json::to_string(&event).map_err(|_| {
+            redis::RedisError::from((redis::ErrorKind::TypeError, "failed to serialize like event"))
+        })?;
+
+        let mut connection = self.redis_client.get_multiplexed_async_connection().await?;
+        let _: i64 = connection
+            .publish(channel_name(content_type, content_id), payload)
+            .await?;
+
+        Ok(())
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LikeEvent {
     pub event: String,
     pub user_id: String,
@@ -71,4 +95,8 @@ pub fn current_timestamp() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .expect("current timestamp must format as RFC3339")
+}
+
+pub fn channel_name(content_type: &ContentType, content_id: &ContentId) -> String {
+    format!("likes:events:{content_type}:{content_id}")
 }

@@ -4,7 +4,7 @@ use crate::error::AppError;
 use crate::metrics::{
     record_sse_connection_close, record_sse_connection_open, record_sse_event_sent,
 };
-use crate::sse_events::current_timestamp;
+use crate::sse_events::{current_timestamp, LikeEvent};
 use async_stream::stream;
 use axum::{
     extract::{Query, State},
@@ -13,9 +13,9 @@ use axum::{
         IntoResponse, Response,
     },
 };
+use futures_util::StreamExt;
 use serde_json::json;
 use std::{convert::Infallible, str::FromStr, time::Duration};
-use tokio::sync::broadcast::error::RecvError;
 
 use super::dto::LikeEventsStreamQuery;
 
@@ -31,12 +31,23 @@ pub(crate) async fn stream_like_events(
         Err(error) => return error.into_response(),
     };
 
+    let mut pubsub = match state.like_events.subscribe(&content_type, &content_id).await {
+        Ok(pubsub) => pubsub,
+        Err(error) => {
+            return AppError::dependency_unavailable(
+                "DEPENDENCY_UNAVAILABLE",
+                format!("failed to subscribe to like events: {error}"),
+            )
+            .into_response();
+        }
+    };
+
     record_sse_connection_open(LIKE_EVENTS_STREAM_NAME);
 
     let event_stream = stream! {
         let _connection_guard = SseConnectionGuard::new(LIKE_EVENTS_STREAM_NAME);
         let mut shutdown = state.shutdown_signal.subscribe();
-        let mut receiver = state.like_events.subscribe();
+        let mut messages = pubsub.on_message();
         let mut heartbeat = tokio::time::interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECONDS));
         heartbeat.tick().await;
 
@@ -56,12 +67,26 @@ pub(crate) async fn stream_like_events(
                     record_sse_event_sent(LIKE_EVENTS_STREAM_NAME, "heartbeat");
                     yield Ok::<Event, Infallible>(Event::default().data(payload.to_string()));
                 }
-                result = receiver.recv() => {
-                    match result {
-                        Ok(event) => {
-                            if event.content_type != content_type.to_string() || event.content_id != content_id.to_string() {
-                                continue;
-                            }
+                maybe_message = messages.next() => {
+                    match maybe_message {
+                        Some(message) => {
+                            let payload: Result<String, _> = message.get_payload();
+
+                            let event = match payload
+                                .ok()
+                                .and_then(|payload| serde_json::from_str::<LikeEvent>(&payload).ok()) {
+                                Some(event) => event,
+                                None => {
+                                    let payload = json!({
+                                        "event": "error",
+                                        "message": "failed to decode like event",
+                                    });
+
+                                    record_sse_event_sent(LIKE_EVENTS_STREAM_NAME, "error");
+                                    yield Ok::<Event, Infallible>(Event::default().data(payload.to_string()));
+                                    continue;
+                                }
+                            };
 
                             let payload = json!({
                                 "event": event.event,
@@ -74,16 +99,7 @@ pub(crate) async fn stream_like_events(
                             record_sse_event_sent(LIKE_EVENTS_STREAM_NAME, event_name);
                             yield Ok::<Event, Infallible>(Event::default().data(payload.to_string()));
                         }
-                        Err(RecvError::Lagged(_)) => {
-                            let payload = json!({
-                                "event": "error",
-                                "message": "stream lagged behind",
-                            });
-
-                            record_sse_event_sent(LIKE_EVENTS_STREAM_NAME, "error");
-                            yield Ok::<Event, Infallible>(Event::default().data(payload.to_string()));
-                        }
-                        Err(RecvError::Closed) => {
+                        None => {
                             break;
                         }
                     }
