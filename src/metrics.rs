@@ -109,6 +109,50 @@ static CIRCUIT_BREAKER_STATE: Lazy<IntGaugeVec> = Lazy::new(|| {
     .expect("circuit breaker state gauge must be valid")
 });
 
+static SSE_CONNECTIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_sse_connections_total",
+            "Total number of SSE connections opened",
+        ),
+        &["stream"],
+    )
+    .expect("sse connections counter must be valid")
+});
+
+static SSE_CONNECTIONS_ACTIVE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    IntGaugeVec::new(
+        Opts::new(
+            "social_api_sse_connections_active",
+            "Current number of active SSE connections",
+        ),
+        &["stream"],
+    )
+    .expect("sse active gauge must be valid")
+});
+
+static SSE_EVENTS_SENT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_sse_events_sent_total",
+            "Total number of SSE events sent",
+        ),
+        &["stream", "event"],
+    )
+    .expect("sse events counter must be valid")
+});
+
+static SSE_DISCONNECTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    IntCounterVec::new(
+        Opts::new(
+            "social_api_sse_disconnects_total",
+            "Total number of SSE connections closed",
+        ),
+        &["stream"],
+    )
+    .expect("sse disconnects counter must be valid")
+});
+
 pub fn init_metrics() {
     REGISTRY
         .register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
@@ -137,6 +181,18 @@ pub fn init_metrics() {
     REGISTRY
         .register(Box::new(CIRCUIT_BREAKER_STATE.clone()))
         .expect("circuit breaker state gauge must register");
+    REGISTRY
+        .register(Box::new(SSE_CONNECTIONS_TOTAL.clone()))
+        .expect("sse connections counter must register");
+    REGISTRY
+        .register(Box::new(SSE_CONNECTIONS_ACTIVE.clone()))
+        .expect("sse active gauge must register");
+    REGISTRY
+        .register(Box::new(SSE_EVENTS_SENT_TOTAL.clone()))
+        .expect("sse events counter must register");
+    REGISTRY
+        .register(Box::new(SSE_DISCONNECTS_TOTAL.clone()))
+        .expect("sse disconnects counter must register");
 }
 
 pub fn record_http_request(method: &str, path: &str, status: u16, latency_seconds: f64) {
@@ -188,6 +244,26 @@ pub fn set_circuit_breaker_state(service: &str, is_open: bool) {
     CIRCUIT_BREAKER_STATE
         .with_label_values(&[service])
         .set(if is_open { 1 } else { 0 });
+}
+
+pub fn record_sse_connection_open(stream: &str) {
+    SSE_CONNECTIONS_TOTAL.with_label_values(&[stream]).inc();
+    SSE_CONNECTIONS_ACTIVE
+        .with_label_values(&[stream])
+        .inc();
+}
+
+pub fn record_sse_connection_close(stream: &str) {
+    SSE_DISCONNECTS_TOTAL.with_label_values(&[stream]).inc();
+    SSE_CONNECTIONS_ACTIVE
+        .with_label_values(&[stream])
+        .dec();
+}
+
+pub fn record_sse_event_sent(stream: &str, event: &str) {
+    SSE_EVENTS_SENT_TOTAL
+        .with_label_values(&[stream, event])
+        .inc();
 }
 
 pub async fn metrics_handler() -> Response {
