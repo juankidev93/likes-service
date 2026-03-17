@@ -198,6 +198,157 @@ async fn profile_api_circuit_breaker_opens_and_rejects_following_requests() {
     server.shutdown().await;
 }
 
+#[tokio::test]
+#[serial]
+async fn top_likes_returns_items_sorted_by_count() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    create_like(
+        &server,
+        "valid-alice-token",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+    create_like(
+        &server,
+        "valid-bob-token",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+    create_like(
+        &server,
+        "valid-charlie-token",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+
+    create_like(
+        &server,
+        "valid-alice-token",
+        "bonus_hunter",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1",
+    )
+    .await;
+    create_like(
+        &server,
+        "valid-bob-token",
+        "bonus_hunter",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1",
+    )
+    .await;
+
+    let response = server
+        .client
+        .get(format!("{}/v1/likes/top?window=all&limit=10", server.base_url))
+        .send()
+        .await
+        .expect("top request must succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body: Value = response.json().await.expect("response must be valid json");
+    assert_eq!(body["results"][0]["content_type"], "post");
+    assert_eq!(
+        body["results"][0]["content_id"],
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+    );
+    assert_eq!(body["results"][0]["count"], 3);
+    assert_eq!(body["results"][1]["content_type"], "bonus_hunter");
+    assert_eq!(
+        body["results"][1]["content_id"],
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1"
+    );
+    assert_eq!(body["results"][1]["count"], 2);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn likes_stream_emits_snapshot_event() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    create_like(
+        &server,
+        "valid-alice-token",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+    create_like(
+        &server,
+        "valid-bob-token",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+
+    let response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/stream?window=all&limit=5",
+            server.base_url
+        ))
+        .send()
+        .await
+        .expect("stream request must succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let first_chunk = tokio::time::timeout(Duration::from_secs(2), async move {
+        let mut response = response;
+        response.chunk().await
+    })
+    .await
+    .expect("stream should emit quickly")
+    .expect("chunk read should succeed")
+    .expect("stream should emit at least one chunk");
+
+    let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
+    assert!(chunk.contains("event: snapshot"));
+    assert!(chunk.contains("\"window\":\"all\""));
+    assert!(chunk.contains("\"content_type\":\"post\""));
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn count_falls_back_to_postgres_when_redis_is_unavailable() {
+    let server = TestServer::spawn(|config| {
+        config.redis_url = "redis://127.0.0.1:9/".to_string();
+    })
+    .await;
+
+    insert_like_directly(
+        &server.database_url,
+        "11111111-1111-1111-1111-111111111111",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+
+    let response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/post/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1/count",
+            server.base_url
+        ))
+        .send()
+        .await
+        .expect("count request must succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body: Value = response.json().await.expect("response must be valid json");
+    assert_eq!(body["count"], 1);
+
+    server.shutdown().await;
+}
+
 struct TestServer {
     base_url: String,
     client: reqwest::Client,
@@ -221,9 +372,28 @@ impl TestServer {
         override_config(&mut config);
 
         cleanup_database(&config.database_url).await;
-        cleanup_redis(&config.redis_url).await;
+        let local_redis_url = env::var("REDIS_URL").expect("REDIS_URL must be set for tests");
+        if config.redis_url == local_redis_url {
+            cleanup_redis(&config.redis_url).await;
+        }
 
-        let app_state = build_app_state(&config).await;
+        let mut bootstrap_config = base_test_config(address);
+        bootstrap_config.write_rate_limit_per_minute = config.write_rate_limit_per_minute;
+        bootstrap_config.read_rate_limit_per_minute = config.read_rate_limit_per_minute;
+        bootstrap_config.circuit_breaker_failure_threshold = config.circuit_breaker_failure_threshold;
+        bootstrap_config.circuit_breaker_open_seconds = config.circuit_breaker_open_seconds;
+        bootstrap_config.profile_api_base_url = config.profile_api_base_url.clone();
+        bootstrap_config.post_content_api_base_url = config.post_content_api_base_url.clone();
+        bootstrap_config.bonus_hunter_content_api_base_url =
+            config.bonus_hunter_content_api_base_url.clone();
+        bootstrap_config.top_picks_content_api_base_url =
+            config.top_picks_content_api_base_url.clone();
+
+        let mut app_state = build_app_state(&bootstrap_config).await;
+        if config.redis_url != local_redis_url {
+            app_state.redis_client = redis::Client::open(config.redis_url.clone())
+                .expect("test redis override must be a valid url");
+        }
         let app = build_app(app_state);
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -261,7 +431,9 @@ impl TestServer {
             .expect("test server task must finish cleanly");
 
         cleanup_database(&self.database_url).await;
-        cleanup_redis(&self.redis_url).await;
+        if self.redis_url == env::var("REDIS_URL").expect("REDIS_URL must be set for tests") {
+            cleanup_redis(&self.redis_url).await;
+        }
     }
 }
 
@@ -324,4 +496,75 @@ async fn cleanup_redis(redis_url: &str) {
                 .expect("redis DEL must succeed");
         }
     }
+}
+
+async fn create_like(server: &TestServer, token: &str, content_type: &str, content_id: &str) {
+    let response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth(token)
+        .json(&json!({
+            "content_type": content_type,
+            "content_id": content_id
+        }))
+        .send()
+        .await
+        .expect("create like request must succeed");
+
+    assert!(
+        response.status() == StatusCode::CREATED || response.status() == StatusCode::OK,
+        "unexpected like response status: {}",
+        response.status()
+    );
+}
+
+async fn insert_like_directly(
+    database_url: &str,
+    user_id: &str,
+    content_type: &str,
+    content_id: &str,
+) {
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database_url)
+        .await
+        .expect("test database connection must work");
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .expect("test transaction must start");
+
+    sqlx::query(
+        r#"
+        INSERT INTO likes (user_id, content_type, content_id)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id, content_type, content_id) DO NOTHING
+        "#,
+    )
+    .bind(user_id)
+    .bind(content_type)
+    .bind(content_id)
+    .execute(&mut *transaction)
+    .await
+    .expect("test like insert must succeed");
+
+    sqlx::query(
+        r#"
+        INSERT INTO like_counts (content_type, content_id, like_count)
+        VALUES ($1, $2, 1)
+        ON CONFLICT (content_type, content_id)
+        DO UPDATE SET like_count = 1
+        "#,
+    )
+    .bind(content_type)
+    .bind(content_id)
+    .execute(&mut *transaction)
+    .await
+    .expect("test like count upsert must succeed");
+
+    transaction
+        .commit()
+        .await
+        .expect("test transaction must commit");
 }
