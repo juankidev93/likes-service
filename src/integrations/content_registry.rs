@@ -33,3 +33,54 @@ impl ContentTypeRegistry {
         definitions
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_returns_definitions_by_content_type() {
+        let registry = ContentTypeRegistry::new(vec![
+            ContentApiDefinition {
+                content_type: "post".to_string(),
+                base_url: "http://post-api".to_string(),
+            },
+            ContentApiDefinition {
+                content_type: "bonus_hunter".to_string(),
+                base_url: "http://bonus-api".to_string(),
+            },
+        ]);
+
+        let definition = registry.get("post").expect("post definition must exist");
+
+        assert_eq!(definition.content_type, "post");
+        assert_eq!(definition.base_url, "http://post-api");
+        assert!(registry.get("top_picks").is_none());
+    }
+
+    #[test]
+    fn registry_all_returns_sorted_definitions() {
+        let registry = ContentTypeRegistry::new(vec![
+            ContentApiDefinition {
+                content_type: "top_picks".to_string(),
+                base_url: "http://top-picks-api".to_string(),
+            },
+            ContentApiDefinition {
+                content_type: "bonus_hunter".to_string(),
+                base_url: "http://bonus-api".to_string(),
+            },
+            ContentApiDefinition {
+                content_type: "post".to_string(),
+                base_url: "http://post-api".to_string(),
+            },
+        ]);
+
+        let ordered: Vec<_> = registry
+            .all()
+            .into_iter()
+            .map(|definition| definition.content_type.as_str())
+            .collect();
+
+        assert_eq!(ordered, vec!["bonus_hunter", "post", "top_picks"]);
+    }
+}

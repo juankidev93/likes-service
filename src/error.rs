@@ -326,3 +326,46 @@ struct HttpErrorDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
     details: Option<Value>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_errors_map_to_expected_http_errors() {
+        let (status, code, message, details) =
+            AppError::from(DomainError::InvalidContentType("unknown".to_string())).as_http_error();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(code, "INVALID_CONTENT_TYPE");
+        assert_eq!(message, "invalid content type");
+        assert_eq!(details, Some(json!({ "field": "content_type" })));
+
+        let (status, code, message, details) =
+            AppError::from(DomainError::InvalidContentId("bad-id".to_string())).as_http_error();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(code, "INVALID_CONTENT_ID");
+        assert_eq!(message, "invalid content id");
+        assert_eq!(details, Some(json!({ "field": "content_id" })));
+    }
+
+    #[test]
+    fn content_validation_not_found_maps_to_404() {
+        let error = AppError::from(ContentValidationError::ContentNotFound {
+            content_type: "post".to_string(),
+            content_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1".to_string(),
+        });
+
+        let (status, code, message, details) = error.as_http_error();
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(code, "CONTENT_NOT_FOUND");
+        assert_eq!(message, "content not found");
+        assert_eq!(
+            details,
+            Some(json!({
+                "content_type": "post",
+                "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+            }))
+        );
+    }
+}

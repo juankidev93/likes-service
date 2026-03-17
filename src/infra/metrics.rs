@@ -104,7 +104,7 @@ static CIRCUIT_BREAKER_STATE: Lazy<IntGaugeVec> = Lazy::new(|| {
     IntGaugeVec::new(
         Opts::new(
             "social_api_circuit_breaker_state",
-            "Current circuit breaker state, where 0 is closed and 1 is open",
+            "Current circuit breaker state, where 0 is closed, 1 is half-open, and 2 is open",
         ),
         &["service"],
     )
@@ -336,12 +336,14 @@ pub fn record_rate_limit_fail_open(scope: &str) {
 fn update_db_pool_metrics(state: &AppState) {
     let write_total = state.db_pool.size() as i64;
     let write_idle = state.db_pool.num_idle() as i64;
+    let write_max = state.db_pool.options().get_max_connections() as i64;
     let read_total = state.read_db_pool.size() as i64;
     let read_idle = state.read_db_pool.num_idle() as i64;
+    let read_max = state.read_db_pool.options().get_max_connections() as i64;
 
     DB_POOL_CONNECTIONS
-        .with_label_values(&["total"])
-        .set(write_total + read_total);
+        .with_label_values(&["max"])
+        .set(write_max + read_max);
     DB_POOL_CONNECTIONS
         .with_label_values(&["idle"])
         .set(write_idle + read_idle);

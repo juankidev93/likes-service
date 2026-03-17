@@ -134,3 +134,32 @@ pub(super) fn parse_batch_items(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    #[test]
+    fn cursor_roundtrip_preserves_fields() {
+        let row = UserLikeRow {
+            content_type: "post".to_string(),
+            content_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1".to_string(),
+            liked_at: "2026-02-02T17:00:00Z".to_string(),
+        };
+
+        let encoded = encode_cursor(&row);
+        let decoded = decode_cursor(&encoded).expect("encoded cursor must decode");
+
+        assert_eq!(decoded.liked_at, row.liked_at);
+        assert_eq!(decoded.content_id, row.content_id);
+    }
+
+    #[test]
+    fn decode_cursor_rejects_malformed_payload() {
+        let error = decode_cursor("not-base64").expect_err("invalid cursor must fail");
+        let response = error.into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
