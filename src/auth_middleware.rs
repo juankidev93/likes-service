@@ -1,6 +1,6 @@
 use crate::app_state::AppState;
 use crate::error::AppError;
-use crate::profile_api_client::AuthError;
+use crate::profile_api_client::{AuthError, AuthenticatedUser};
 use axum::{
     extract::Request,
     http::{header, HeaderMap},
@@ -13,23 +13,30 @@ pub async fn require_auth(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let bearer_token = match extract_bearer_token(request.headers()) {
-        Ok(token) => token,
-        Err(response) => return response.into_response(),
-    };
-
-    match state.profile_api_client.validate_token(bearer_token).await {
+    match authenticate_headers(&state, request.headers()).await {
         Ok(authenticated_user) => {
             request.extensions_mut().insert(authenticated_user);
             next.run(request).await
         }
+        Err(response) => response,
+    }
+}
+
+pub async fn authenticate_headers(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<AuthenticatedUser, Response> {
+    let bearer_token = extract_bearer_token(headers)?;
+
+    match state.profile_api_client.validate_token(bearer_token).await {
+        Ok(authenticated_user) => Ok(authenticated_user),
         Err(AuthError::InvalidToken) => {
-            AppError::unauthorized("UNAUTHORIZED", "invalid bearer token").into_response()
+            Err(AppError::unauthorized("UNAUTHORIZED", "invalid bearer token").into_response())
         }
-        Err(AuthError::DependencyUnavailable(_)) | Err(AuthError::NetworkError(_)) => {
+        Err(AuthError::DependencyUnavailable(_)) | Err(AuthError::NetworkError(_)) => Err(
             AppError::dependency_unavailable("DEPENDENCY_UNAVAILABLE", "dependency unavailable")
-                .into_response()
-        }
+                .into_response(),
+        ),
     }
 }
 

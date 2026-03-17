@@ -5,6 +5,7 @@ pub struct ServiceConfig {
     pub port: u16,
     pub database_url: String,
     pub redis_url: String,
+    pub write_rate_limit_per_minute: u32,
     pub profile_api_base_url: String,
     pub post_content_api_base_url: String,
     pub bonus_hunter_content_api_base_url: String,
@@ -39,6 +40,16 @@ impl ServiceConfig {
             return Err("REDIS_URL cannot be empty".to_string());
         }
 
+        let write_rate_limit_per_minute =
+            match env::var("WRITE_RATE_LIMIT_PER_MINUTE") {
+                Ok(value) => value.parse::<u32>().map_err(|_| {
+                    format!(
+                        "WRITE_RATE_LIMIT_PER_MINUTE must be a valid u32 integer, got '{value}'"
+                    )
+                })?,
+                Err(_) => 30,
+            };
+
         let profile_api_base_url = env::var("PROFILE_API_BASE_URL")
             .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
 
@@ -70,6 +81,7 @@ impl ServiceConfig {
             port,
             database_url,
             redis_url,
+            write_rate_limit_per_minute,
             profile_api_base_url,
             post_content_api_base_url,
             bonus_hunter_content_api_base_url,

@@ -13,6 +13,7 @@ mod metrics;
 mod mock_content_api;
 mod mock_profile_api;
 mod profile_api_client;
+mod rate_limit;
 mod use_cases;
 
 use axum::{middleware, routing::{delete, get, post}, Json, Router};
@@ -31,6 +32,7 @@ use metrics::{init_metrics, metrics_handler};
 use mock_content_api::{build_mock_content_store, get_content};
 use mock_profile_api::validate_token;
 use profile_api_client::ProfileApiClient;
+use rate_limit::require_write_auth_and_rate_limit;
 use redis::AsyncCommands;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -123,6 +125,7 @@ async fn main() {
     let app_state = AppState {
         db_pool,
         redis_client,
+        write_rate_limit_per_minute: config.write_rate_limit_per_minute,
         mock_profiles,
         mock_content_store,
         content_type_registry,
@@ -130,11 +133,17 @@ async fn main() {
         profile_api_client,
     };
 
-    let authenticated_routes = Router::new()
-        .route("/v1/likes/user", get(list_user_likes))
+    let authenticated_write_routes = Router::new()
         .route("/v1/likes", post(create_like))
-        .route("/v1/likes/batch/statuses", post(get_like_statuses_batch))
         .route("/v1/likes/{content_type}/{content_id}", delete(delete_like))
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            require_write_auth_and_rate_limit,
+        ));
+
+    let authenticated_read_routes = Router::new()
+        .route("/v1/likes/user", get(list_user_likes))
+        .route("/v1/likes/batch/statuses", post(get_like_statuses_batch))
         .route(
             "/v1/likes/{content_type}/{content_id}/status",
             get(get_like_status),
@@ -155,7 +164,8 @@ async fn main() {
             "/v1/likes/{content_type}/{content_id}/count",
             get(get_like_count),
         )
-        .merge(authenticated_routes)
+        .merge(authenticated_write_routes)
+        .merge(authenticated_read_routes)
         .with_state(app_state)
         .layer(middleware::from_fn(request_logging_middleware));
 

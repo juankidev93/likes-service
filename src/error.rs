@@ -2,7 +2,7 @@
 
 use crate::content_validation::ContentValidationError;
 use axum::{
-    http::StatusCode,
+    http::{header::HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -136,6 +136,36 @@ impl AppError {
         }
     }
 
+    pub fn rate_limited(
+        code: &'static str,
+        message: impl Into<String>,
+        limit: u32,
+        remaining: u32,
+        reset_epoch_seconds: u64,
+        retry_after_seconds: u64,
+    ) -> Response {
+        let mut response = (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(HttpErrorBody {
+                error: HttpErrorDetail {
+                    code,
+                    message: message.into(),
+                },
+            }),
+        )
+            .into_response();
+
+        set_rate_limit_headers(
+            &mut response,
+            limit,
+            remaining,
+            reset_epoch_seconds,
+            Some(retry_after_seconds),
+        );
+
+        response
+    }
+
     fn as_http_error(self) -> (StatusCode, &'static str, String) {
         match self {
             Self::InvalidRequest { code, message } => (StatusCode::BAD_REQUEST, code, message),
@@ -188,6 +218,37 @@ impl AppError {
                 "internal error".to_string(),
             ),
         }
+    }
+}
+
+pub fn set_rate_limit_headers(
+    response: &mut Response,
+    limit: u32,
+    remaining: u32,
+    reset_epoch_seconds: u64,
+    retry_after_seconds: Option<u64>,
+) {
+    response.headers_mut().insert(
+        HeaderName::from_static("x-ratelimit-limit"),
+        HeaderValue::from_str(&limit.to_string()).expect("rate limit header must be valid"),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-ratelimit-remaining"),
+        HeaderValue::from_str(&remaining.to_string())
+            .expect("rate limit remaining header must be valid"),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-ratelimit-reset"),
+        HeaderValue::from_str(&reset_epoch_seconds.to_string())
+            .expect("rate limit reset header must be valid"),
+    );
+
+    if let Some(retry_after_seconds) = retry_after_seconds {
+        response.headers_mut().insert(
+            HeaderName::from_static("retry-after"),
+            HeaderValue::from_str(&retry_after_seconds.to_string())
+                .expect("retry-after header must be valid"),
+        );
     }
 }
 
