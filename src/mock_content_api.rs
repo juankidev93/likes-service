@@ -17,9 +17,9 @@ pub async fn get_content(
         Some(content_ids) if content_ids.contains(content_id.as_str()) => (
             StatusCode::OK,
             Json(ContentResponse {
+                id: content_id,
                 content_type,
-                content_id,
-                exists: true,
+                title: "Mock content".to_string(),
             }),
         )
             .into_response(),
@@ -35,6 +35,8 @@ pub fn build_mock_content_store() -> HashMap<String, HashSet<String>> {
                 "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1".to_string(),
                 "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2".to_string(),
                 "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3".to_string(),
+                "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4".to_string(),
+                "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa5".to_string(),
             ]),
         ),
         (
@@ -42,6 +44,9 @@ pub fn build_mock_content_store() -> HashMap<String, HashSet<String>> {
             HashSet::from([
                 "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1".to_string(),
                 "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2".to_string(),
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb3".to_string(),
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb4".to_string(),
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb5".to_string(),
             ]),
         ),
         (
@@ -49,6 +54,9 @@ pub fn build_mock_content_store() -> HashMap<String, HashSet<String>> {
             HashSet::from([
                 "cccccccc-cccc-cccc-cccc-ccccccccccc1".to_string(),
                 "cccccccc-cccc-cccc-cccc-ccccccccccc2".to_string(),
+                "cccccccc-cccc-cccc-cccc-ccccccccccc3".to_string(),
+                "cccccccc-cccc-cccc-cccc-ccccccccccc4".to_string(),
+                "cccccccc-cccc-cccc-cccc-ccccccccccc5".to_string(),
             ]),
         ),
     ])
@@ -56,9 +64,9 @@ pub fn build_mock_content_store() -> HashMap<String, HashSet<String>> {
 
 #[derive(Serialize)]
 struct ContentResponse {
+    id: String,
     content_type: String,
-    content_id: String,
-    exists: bool,
+    title: String,
 }
 
 #[derive(Serialize)]

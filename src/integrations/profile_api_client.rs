@@ -64,8 +64,16 @@ impl ProfileApiClient {
         match status {
             StatusCode::OK => match response.json::<ValidateTokenResponse>().await {
                 Ok(payload) => {
-                    self.circuit_breaker.record_success();
-                    Ok(payload.into())
+                    match payload.into_authenticated_user() {
+                        Ok(user) => {
+                            self.circuit_breaker.record_success();
+                            Ok(user)
+                        }
+                        Err(error) => {
+                            self.circuit_breaker.record_success();
+                            Err(error)
+                        }
+                    }
                 }
                 Err(error) => {
                     self.circuit_breaker.record_failure();
@@ -165,6 +173,7 @@ impl Error for AuthError {}
 
 #[derive(Deserialize)]
 struct ValidateTokenResponse {
+    valid: bool,
     user_id: String,
     display_name: String,
 }
@@ -175,5 +184,15 @@ impl From<ValidateTokenResponse> for AuthenticatedUser {
             user_id: value.user_id,
             display_name: value.display_name,
         }
+    }
+}
+
+impl ValidateTokenResponse {
+    fn into_authenticated_user(self) -> Result<AuthenticatedUser, AuthError> {
+        if !self.valid {
+            return Err(AuthError::InvalidToken);
+        }
+
+        Ok(self.into())
     }
 }

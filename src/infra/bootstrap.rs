@@ -134,24 +134,38 @@ pub fn build_app(app_state: AppState) -> Router {
 fn build_mock_profiles() -> HashMap<String, MockProfile> {
     HashMap::from([
         (
-            "valid-alice-token".to_string(),
+            "tok_user_1".to_string(),
             MockProfile {
                 user_id: "11111111-1111-1111-1111-111111111111".to_string(),
-                display_name: "Alice".to_string(),
+                display_name: "Test User 1".to_string(),
             },
         ),
         (
-            "valid-bob-token".to_string(),
+            "tok_user_2".to_string(),
             MockProfile {
                 user_id: "22222222-2222-2222-2222-222222222222".to_string(),
-                display_name: "Bob".to_string(),
+                display_name: "Test User 2".to_string(),
             },
         ),
         (
-            "valid-charlie-token".to_string(),
+            "tok_user_3".to_string(),
             MockProfile {
                 user_id: "33333333-3333-3333-3333-333333333333".to_string(),
-                display_name: "Charlie".to_string(),
+                display_name: "Test User 3".to_string(),
+            },
+        ),
+        (
+            "tok_user_4".to_string(),
+            MockProfile {
+                user_id: "44444444-4444-4444-4444-444444444444".to_string(),
+                display_name: "Test User 4".to_string(),
+            },
+        ),
+        (
+            "tok_user_5".to_string(),
+            MockProfile {
+                user_id: "55555555-5555-5555-5555-555555555555".to_string(),
+                display_name: "Test User 5".to_string(),
             },
         ),
     ])

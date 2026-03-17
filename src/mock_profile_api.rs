@@ -24,6 +24,7 @@ pub async fn validate_token(
 
 #[derive(Serialize)]
 pub struct ValidateTokenResponse {
+    pub valid: bool,
     pub user_id: String,
     pub display_name: String,
 }
@@ -31,6 +32,7 @@ pub struct ValidateTokenResponse {
 impl From<&MockProfile> for ValidateTokenResponse {
     fn from(value: &MockProfile) -> Self {
         Self {
+            valid: true,
             user_id: value.user_id.clone(),
             display_name: value.display_name.clone(),
         }
@@ -39,6 +41,7 @@ impl From<&MockProfile> for ValidateTokenResponse {
 
 #[derive(Serialize)]
 struct ErrorResponse {
+    valid: bool,
     error: &'static str,
 }
 
@@ -64,6 +67,9 @@ fn success<T>(payload: Json<T>) -> (StatusCode, Json<T>) {
 fn unauthorized(message: &'static str) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::UNAUTHORIZED,
-        Json(ErrorResponse { error: message }),
+        Json(ErrorResponse {
+            valid: false,
+            error: message,
+        }),
     )
 }

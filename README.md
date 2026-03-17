@@ -111,7 +111,7 @@ Create a like:
 
 ```bash
 curl -i -X POST http://127.0.0.1:3000/v1/likes \
-  -H 'Authorization: Bearer valid-alice-token' \
+  -H 'Authorization: Bearer tok_user_1' \
   -H 'content-type: application/json' \
   -d '{"content_type":"post","content_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"}'
 ```

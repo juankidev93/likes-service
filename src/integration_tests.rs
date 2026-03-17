@@ -50,7 +50,7 @@ async fn create_like_with_unknown_content_returns_404() {
     let response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .json(&json!({
             "content_type": "post",
             "content_id": "ffffffff-ffff-ffff-ffff-ffffffffffff"
@@ -91,8 +91,8 @@ async fn content_validation_results_are_cached() {
         &[("operation", "validate_content"), ("result", "miss")],
     );
 
-    create_like(&server, "valid-alice-token", "post", content_id).await;
-    create_like(&server, "valid-bob-token", "post", content_id).await;
+    create_like(&server, "tok_user_1", "post", content_id).await;
+    create_like(&server, "tok_user_2", "post", content_id).await;
 
     let metrics_after = fetch_metrics(&server).await;
     assert!(
@@ -121,7 +121,7 @@ async fn like_then_count_returns_updated_value() {
     let create_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
@@ -173,7 +173,7 @@ async fn write_rate_limit_returns_429_when_exceeded() {
     let first_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
@@ -187,7 +187,7 @@ async fn write_rate_limit_returns_429_when_exceeded() {
     let second_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
@@ -233,7 +233,7 @@ async fn profile_api_circuit_breaker_opens_and_rejects_following_requests() {
     let first_response = server
         .client
         .get(format!("{}/v1/likes/user", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .send()
         .await
         .expect("first request must succeed");
@@ -243,7 +243,7 @@ async fn profile_api_circuit_breaker_opens_and_rejects_following_requests() {
     let second_response = server
         .client
         .get(format!("{}/v1/likes/user", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .send()
         .await
         .expect("second request must succeed");
@@ -290,7 +290,7 @@ async fn content_api_circuit_breaker_opens_and_rejects_following_requests() {
     let first_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
@@ -304,7 +304,7 @@ async fn content_api_circuit_breaker_opens_and_rejects_following_requests() {
     let second_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
@@ -345,7 +345,7 @@ async fn profile_api_circuit_breaker_recovers_after_cooldown() {
     let first_response = server
         .client
         .get(format!("{}/v1/likes/user", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .send()
         .await
         .expect("first request must succeed");
@@ -359,7 +359,7 @@ async fn profile_api_circuit_breaker_recovers_after_cooldown() {
     let second_response = server
         .client
         .get(format!("{}/v1/likes/user", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .send()
         .await
         .expect("second request must succeed");
@@ -379,7 +379,7 @@ async fn profile_api_circuit_breaker_recovers_after_cooldown() {
     let third_response = server
         .client
         .get(format!("{}/v1/likes/user", server.base_url))
-        .bearer_auth("valid-bob-token")
+        .bearer_auth("tok_user_2")
         .send()
         .await
         .expect("third request must succeed");
@@ -388,7 +388,7 @@ async fn profile_api_circuit_breaker_recovers_after_cooldown() {
     let fourth_response = server
         .client
         .get(format!("{}/v1/likes/user", server.base_url))
-        .bearer_auth("valid-charlie-token")
+        .bearer_auth("tok_user_3")
         .send()
         .await
         .expect("fourth request must succeed");
@@ -423,7 +423,7 @@ async fn content_api_circuit_breaker_recovers_after_cooldown() {
     let first_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
@@ -441,7 +441,7 @@ async fn content_api_circuit_breaker_recovers_after_cooldown() {
     let second_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-alice-token")
+        .bearer_auth("tok_user_1")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
@@ -465,7 +465,7 @@ async fn content_api_circuit_breaker_recovers_after_cooldown() {
     let third_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-bob-token")
+        .bearer_auth("tok_user_2")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2"
@@ -478,7 +478,7 @@ async fn content_api_circuit_breaker_recovers_after_cooldown() {
     let fourth_response = server
         .client
         .post(format!("{}/v1/likes", server.base_url))
-        .bearer_auth("valid-charlie-token")
+        .bearer_auth("tok_user_3")
         .json(&json!({
             "content_type": "post",
             "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3"
@@ -509,21 +509,21 @@ async fn top_likes_returns_items_sorted_by_count() {
 
     create_like(
         &server,
-        "valid-alice-token",
+        "tok_user_1",
         "post",
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
     )
     .await;
     create_like(
         &server,
-        "valid-bob-token",
+        "tok_user_2",
         "post",
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
     )
     .await;
     create_like(
         &server,
-        "valid-charlie-token",
+        "tok_user_3",
         "post",
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
     )
@@ -531,14 +531,14 @@ async fn top_likes_returns_items_sorted_by_count() {
 
     create_like(
         &server,
-        "valid-alice-token",
+        "tok_user_1",
         "bonus_hunter",
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1",
     )
     .await;
     create_like(
         &server,
-        "valid-bob-token",
+        "tok_user_2",
         "bonus_hunter",
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1",
     )
@@ -684,7 +684,7 @@ async fn likes_stream_emits_like_event() {
         sleep(Duration::from_millis(50)).await;
         let response = client
             .post(format!("{base_url}/v1/likes"))
-            .bearer_auth("valid-alice-token")
+            .bearer_auth("tok_user_1")
             .json(&json!({
                 "content_type": "post",
                 "content_id": content_id
@@ -729,7 +729,7 @@ async fn likes_stream_emits_unlike_event() {
 
     create_like(
         &server,
-        "valid-alice-token",
+        "tok_user_1",
         "post",
         content_id,
     )
@@ -755,7 +755,7 @@ async fn likes_stream_emits_unlike_event() {
             .delete(format!(
                 "{base_url}/v1/likes/post/{content_id}"
             ))
-            .bearer_auth("valid-alice-token")
+            .bearer_auth("tok_user_1")
             .send()
             .await
             .expect("delete request must succeed");
@@ -927,7 +927,7 @@ async fn sse_metrics_track_connections_and_events() {
         sleep(Duration::from_millis(50)).await;
         let response = client
             .post(format!("{base_url}/v1/likes"))
-            .bearer_auth("valid-alice-token")
+            .bearer_auth("tok_user_1")
             .json(&json!({
                 "content_type": "post",
                 "content_id": content_id
@@ -1264,6 +1264,7 @@ async fn spawn_profile_mock_server(address: SocketAddr) -> AuxiliaryServer {
         "/v1/auth/validate",
         get(|| async {
             Json(json!({
+                "valid": true,
                 "user_id": "11111111-1111-1111-1111-111111111111",
                 "display_name": "Alice Test"
             }))
@@ -1278,9 +1279,9 @@ async fn spawn_content_mock_server(address: SocketAddr) -> AuxiliaryServer {
         "/v1/{content_type}/{content_id}",
         get(|Path((content_type, content_id)): Path<(String, String)>| async move {
             Json(json!({
+                "id": content_id,
                 "content_type": content_type,
-                "content_id": content_id,
-                "exists": true
+                "title": "Mock content"
             }))
         }),
     );
