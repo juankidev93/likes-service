@@ -98,6 +98,83 @@ impl ContentValidationClient {
             }
         }
     }
+
+    pub async fn check_availability(&self) -> Result<(), ContentValidationError> {
+        let definitions = self.registry.all();
+
+        if definitions.is_empty() {
+            return Err(ContentValidationError::DependencyUnavailable(
+                "no content api definitions configured".to_string(),
+            ));
+        }
+
+        let mut last_error = None;
+
+        for definition in definitions {
+            if let Err(error) = self.circuit_breaker.allow_request() {
+                record_external_call(
+                    "content_api",
+                    "GET /v1/{content_type}/{content_id}",
+                    "circuit_open",
+                    0.0,
+                );
+                last_error = Some(ContentValidationError::DependencyUnavailable(error.to_string()));
+                continue;
+            }
+
+            let url = format!(
+                "{}/v1/{}/{}",
+                definition.base_url.trim_end_matches('/'),
+                definition.content_type,
+                "00000000-0000-0000-0000-000000000000"
+            );
+
+            let start = Instant::now();
+            let response = self.http_client.get(url).send().await;
+
+            let response = match response {
+                Ok(response) => response,
+                Err(error) => {
+                    self.circuit_breaker.record_failure();
+                    record_external_call(
+                        "content_api",
+                        "GET /v1/{content_type}/{content_id}",
+                        "network_error",
+                        start.elapsed().as_secs_f64(),
+                    );
+                    last_error = Some(ContentValidationError::NetworkError(error.to_string()));
+                    continue;
+                }
+            };
+
+            let status = response.status();
+            record_external_call(
+                "content_api",
+                "GET /v1/{content_type}/{content_id}",
+                status.as_str(),
+                start.elapsed().as_secs_f64(),
+            );
+
+            match status {
+                StatusCode::OK | StatusCode::NOT_FOUND => {
+                    self.circuit_breaker.record_success();
+                    return Ok(());
+                }
+                status => {
+                    self.circuit_breaker.record_failure();
+                    last_error = Some(ContentValidationError::DependencyUnavailable(format!(
+                        "unexpected content api status: {status}"
+                    )));
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            ContentValidationError::DependencyUnavailable(
+                "content api availability check failed".to_string(),
+            )
+        }))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -11,10 +11,10 @@ use serde::Serialize;
 pub async fn ready_health(State(state): State<AppState>) -> Response {
     let postgres = check_postgres(&state).await;
     let redis = check_redis(&state).await;
-    let profile_api = check_profile_api(&state).await;
+    let content_api = check_content_api(&state).await;
 
     let response = ReadinessResponse {
-        status: if postgres.ok && redis.ok && profile_api.ok {
+        status: if postgres.ok && redis.ok && content_api.ok {
             "ready"
         } else {
             "not_ready"
@@ -22,7 +22,7 @@ pub async fn ready_health(State(state): State<AppState>) -> Response {
         checks: ReadinessChecks {
             postgres: postgres.status,
             redis: redis.status,
-            profile_api: profile_api.status,
+            content_api: content_api.status,
         },
     };
 
@@ -57,8 +57,8 @@ async fn check_redis(state: &AppState) -> DependencyCheckResult {
     }
 }
 
-async fn check_profile_api(state: &AppState) -> DependencyCheckResult {
-    match state.profile_api_client.check_availability().await {
+async fn check_content_api(state: &AppState) -> DependencyCheckResult {
+    match state.content_validation_client.check_availability().await {
         Ok(_) => DependencyCheckResult::ok(),
         Err(_) => DependencyCheckResult::failed(),
     }
@@ -95,5 +95,5 @@ struct ReadinessResponse {
 struct ReadinessChecks {
     postgres: &'static str,
     redis: &'static str,
-    profile_api: &'static str,
+    content_api: &'static str,
 }
