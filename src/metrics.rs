@@ -273,7 +273,6 @@ pub fn record_circuit_breaker_open(service: &str) {
     CIRCUIT_BREAKER_OPEN_TOTAL
         .with_label_values(&[service])
         .inc();
-    CIRCUIT_BREAKER_STATE.with_label_values(&[service]).set(1);
 }
 
 pub fn record_circuit_breaker_rejected(service: &str) {
@@ -282,10 +281,8 @@ pub fn record_circuit_breaker_rejected(service: &str) {
         .inc();
 }
 
-pub fn set_circuit_breaker_state(service: &str, is_open: bool) {
-    CIRCUIT_BREAKER_STATE
-        .with_label_values(&[service])
-        .set(if is_open { 1 } else { 0 });
+pub fn set_circuit_breaker_state(service: &str, state: i64) {
+    CIRCUIT_BREAKER_STATE.with_label_values(&[service]).set(state);
 }
 
 pub fn record_sse_connection_open(stream: &str) {

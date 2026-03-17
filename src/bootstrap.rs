@@ -59,11 +59,15 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
         "profile_api",
         config.circuit_breaker_failure_threshold,
         Duration::from_secs(config.circuit_breaker_open_seconds),
+        config.circuit_breaker_success_threshold,
+        Duration::from_secs(config.circuit_breaker_failure_window_seconds),
     );
     let content_api_circuit_breaker = CircuitBreaker::new(
         "content_api",
         config.circuit_breaker_failure_threshold,
         Duration::from_secs(config.circuit_breaker_open_seconds),
+        config.circuit_breaker_success_threshold,
+        Duration::from_secs(config.circuit_breaker_failure_window_seconds),
     );
     let profile_api_client = ProfileApiClient::new(
         config.profile_api_base_url.clone(),

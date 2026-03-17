@@ -290,6 +290,7 @@ async fn profile_api_circuit_breaker_recovers_after_cooldown() {
         config.profile_api_base_url = format!("http://{}", mock_address);
         config.circuit_breaker_failure_threshold = 1;
         config.circuit_breaker_open_seconds = 1;
+        config.circuit_breaker_success_threshold = 3;
     })
     .await;
 
@@ -317,6 +318,34 @@ async fn profile_api_circuit_breaker_recovers_after_cooldown() {
 
     assert_eq!(second_response.status(), StatusCode::OK);
 
+    let half_open_metrics = fetch_metrics(&server).await;
+    assert_eq!(
+        metric_value(
+            &half_open_metrics,
+            "social_api_circuit_breaker_state",
+            &[("service", "profile_api")],
+        ),
+        1.0
+    );
+
+    let third_response = server
+        .client
+        .get(format!("{}/v1/likes/user", server.base_url))
+        .bearer_auth("valid-bob-token")
+        .send()
+        .await
+        .expect("third request must succeed");
+    assert_eq!(third_response.status(), StatusCode::OK);
+
+    let fourth_response = server
+        .client
+        .get(format!("{}/v1/likes/user", server.base_url))
+        .bearer_auth("valid-charlie-token")
+        .send()
+        .await
+        .expect("fourth request must succeed");
+    assert_eq!(fourth_response.status(), StatusCode::OK);
+
     let metrics_body = fetch_metrics(&server).await;
     assert_eq!(
         metric_value(
@@ -339,6 +368,7 @@ async fn content_api_circuit_breaker_recovers_after_cooldown() {
         config.post_content_api_base_url = format!("http://{}", mock_address);
         config.circuit_breaker_failure_threshold = 1;
         config.circuit_breaker_open_seconds = 1;
+        config.circuit_breaker_success_threshold = 3;
     })
     .await;
 
@@ -373,6 +403,42 @@ async fn content_api_circuit_breaker_recovers_after_cooldown() {
         .expect("second request must succeed");
 
     assert_eq!(second_response.status(), StatusCode::CREATED);
+
+    let half_open_metrics = fetch_metrics(&server).await;
+    assert_eq!(
+        metric_value(
+            &half_open_metrics,
+            "social_api_circuit_breaker_state",
+            &[("service", "content_api")],
+        ),
+        1.0
+    );
+
+    let third_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-bob-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2"
+        }))
+        .send()
+        .await
+        .expect("third request must succeed");
+    assert_eq!(third_response.status(), StatusCode::CREATED);
+
+    let fourth_response = server
+        .client
+        .post(format!("{}/v1/likes", server.base_url))
+        .bearer_auth("valid-charlie-token")
+        .json(&json!({
+            "content_type": "post",
+            "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3"
+        }))
+        .send()
+        .await
+        .expect("fourth request must succeed");
+    assert_eq!(fourth_response.status(), StatusCode::CREATED);
 
     let metrics_body = fetch_metrics(&server).await;
     assert_eq!(
@@ -1014,6 +1080,10 @@ impl TestServer {
         bootstrap_config.read_rate_limit_per_minute = config.read_rate_limit_per_minute;
         bootstrap_config.circuit_breaker_failure_threshold = config.circuit_breaker_failure_threshold;
         bootstrap_config.circuit_breaker_open_seconds = config.circuit_breaker_open_seconds;
+        bootstrap_config.circuit_breaker_success_threshold =
+            config.circuit_breaker_success_threshold;
+        bootstrap_config.circuit_breaker_failure_window_seconds =
+            config.circuit_breaker_failure_window_seconds;
         bootstrap_config.profile_api_base_url = config.profile_api_base_url.clone();
         bootstrap_config.post_content_api_base_url = config.post_content_api_base_url.clone();
         bootstrap_config.bonus_hunter_content_api_base_url =
@@ -1115,6 +1185,8 @@ fn base_test_config(address: SocketAddr) -> ServiceConfig {
         read_rate_limit_per_minute: 1000,
         circuit_breaker_failure_threshold: 3,
         circuit_breaker_open_seconds: 30,
+        circuit_breaker_success_threshold: 3,
+        circuit_breaker_failure_window_seconds: 30,
         profile_api_base_url: format!("http://{}", address),
         post_content_api_base_url: format!("http://{}", address),
         bonus_hunter_content_api_base_url: format!("http://{}", address),
