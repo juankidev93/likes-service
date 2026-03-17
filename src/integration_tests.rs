@@ -11,7 +11,7 @@ use std::env;
 use std::net::SocketAddr;
 use std::sync::Once;
 use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{sleep, Duration};
 
 static TEST_INIT: Once = Once::new();
@@ -108,6 +108,208 @@ async fn content_validation_results_are_cached() {
             "social_api_cache_operations_total",
             &[("operation", "validate_content"), ("result", "hit")],
         ) >= hits_before + 1.0
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn batch_endpoints_reject_mixed_payloads_with_invalid_items() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    let invalid_payload = json!({
+        "items": [
+            {
+                "content_type": "post",
+                "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+            },
+            {
+                "content_type": "post",
+                "content_id": "not-a-uuid"
+            }
+        ]
+    });
+
+    let counts_response = server
+        .client
+        .post(format!("{}/v1/likes/batch/counts", server.base_url))
+        .json(&invalid_payload)
+        .send()
+        .await
+        .expect("batch counts request must succeed");
+
+    assert_eq!(counts_response.status(), StatusCode::BAD_REQUEST);
+    let counts_body: Value = counts_response
+        .json()
+        .await
+        .expect("batch counts response must be valid json");
+    assert_eq!(counts_body["error"]["code"], "INVALID_CONTENT_ID");
+    assert_eq!(counts_body["error"]["details"]["field"], "content_id");
+
+    let statuses_response = server
+        .client
+        .post(format!("{}/v1/likes/batch/statuses", server.base_url))
+        .bearer_auth("tok_user_1")
+        .json(&invalid_payload)
+        .send()
+        .await
+        .expect("batch statuses request must succeed");
+
+    assert_eq!(statuses_response.status(), StatusCode::BAD_REQUEST);
+    let statuses_body: Value = statuses_response
+        .json()
+        .await
+        .expect("batch statuses response must be valid json");
+    assert_eq!(statuses_body["error"]["code"], "INVALID_CONTENT_ID");
+    assert_eq!(statuses_body["error"]["details"]["field"], "content_id");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn user_likes_returns_empty_page_when_user_has_no_likes() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    let response = server
+        .client
+        .get(format!("{}/v1/likes/user?limit=2", server.base_url))
+        .bearer_auth("tok_user_1")
+        .send()
+        .await
+        .expect("user likes request must succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body: Value = response.json().await.expect("response must be valid json");
+    assert_eq!(body["items"], json!([]));
+    assert_eq!(body["has_more"], false);
+    assert!(body["next_cursor"].is_null());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn user_likes_last_page_has_no_next_cursor() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    create_like(
+        &server,
+        "tok_user_1",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+    sleep(Duration::from_millis(5)).await;
+    create_like(
+        &server,
+        "tok_user_1",
+        "bonus_hunter",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1",
+    )
+    .await;
+
+    let first_page = server
+        .client
+        .get(format!("{}/v1/likes/user?limit=1", server.base_url))
+        .bearer_auth("tok_user_1")
+        .send()
+        .await
+        .expect("first page request must succeed");
+
+    assert_eq!(first_page.status(), StatusCode::OK);
+    let first_body: Value = first_page.json().await.expect("first page must be valid json");
+    assert_eq!(first_body["items"].as_array().map(|items| items.len()), Some(1));
+    assert_eq!(first_body["has_more"], true);
+    let next_cursor = first_body["next_cursor"]
+        .as_str()
+        .expect("first page must expose next cursor")
+        .to_string();
+
+    let second_page = server
+        .client
+        .get(format!(
+            "{}/v1/likes/user?limit=1&cursor={next_cursor}",
+            server.base_url
+        ))
+        .bearer_auth("tok_user_1")
+        .send()
+        .await
+        .expect("second page request must succeed");
+
+    assert_eq!(second_page.status(), StatusCode::OK);
+    let second_body: Value = second_page
+        .json()
+        .await
+        .expect("second page must be valid json");
+    assert_eq!(second_body["items"].as_array().map(|items| items.len()), Some(1));
+    assert_eq!(second_body["has_more"], false);
+    assert!(second_body["next_cursor"].is_null());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn concurrent_duplicate_likes_keep_a_single_row_and_count() {
+    let server = TestServer::spawn(|_| {}).await;
+    let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4";
+    let mut join_set = JoinSet::new();
+
+    for _ in 0..10 {
+        let client = server.client.clone();
+        let base_url = server.base_url.clone();
+        join_set.spawn(async move {
+            client
+                .post(format!("{base_url}/v1/likes"))
+                .bearer_auth("tok_user_1")
+                .json(&json!({
+                    "content_type": "post",
+                    "content_id": content_id
+                }))
+                .send()
+                .await
+                .expect("concurrent like request must succeed")
+                .status()
+        });
+    }
+
+    let mut created_count = 0;
+    let mut ok_count = 0;
+
+    while let Some(result) = join_set.join_next().await {
+        let status = result.expect("join must succeed");
+        match status {
+            StatusCode::CREATED => created_count += 1,
+            StatusCode::OK => ok_count += 1,
+            other => panic!("unexpected concurrent like status: {other}"),
+        }
+    }
+
+    assert_eq!(created_count, 1, "exactly one request should create the like");
+    assert_eq!(ok_count, 9, "remaining requests should observe the existing like");
+
+    let count_response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/post/{content_id}/count",
+            server.base_url
+        ))
+        .send()
+        .await
+        .expect("count request must succeed");
+    assert_eq!(count_response.status(), StatusCode::OK);
+    let count_body: Value = count_response
+        .json()
+        .await
+        .expect("count body must be valid json");
+    assert_eq!(count_body["count"], 1);
+
+    assert_eq!(
+        count_likes_rows(&server.database_url, "post", content_id).await,
+        1
     );
 
     server.shutdown().await;
@@ -1522,4 +1724,26 @@ async fn insert_like_directly_with_offset(
         .commit()
         .await
         .expect("test transaction must commit");
+}
+
+async fn count_likes_rows(database_url: &str, content_type: &str, content_id: &str) -> i64 {
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database_url)
+        .await
+        .expect("test database connection must work");
+
+    sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM likes
+        WHERE content_type = $1
+          AND content_id = $2
+        "#,
+    )
+    .bind(content_type)
+    .bind(content_id)
+    .fetch_one(&pool)
+    .await
+    .expect("likes row count query must succeed")
 }
