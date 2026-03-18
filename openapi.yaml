@@ -34,22 +34,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LikeResponse'
+              example:
+                liked: true
+                already_existed: false
+                count: 42
+                liked_at: '2026-02-02T17:00:00Z'
         '200':
           description: Like already existed, request remained idempotent
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/LikeResponse'
+              example:
+                liked: true
+                already_existed: true
+                count: 42
+                liked_at: '2026-02-02T17:00:00Z'
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InvalidLikeRequestResponse'
         '401':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedResponse'
         '404':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/ContentNotFoundResponse'
         '429':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/RateLimitedResponse'
         '503':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/DependencyUnavailableResponse'
+        '500':
+          $ref: '#/components/responses/InternalErrorResponse'
   /v1/likes/{content_type}/{content_id}:
     delete:
       tags: [Likes]
@@ -66,16 +78,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnlikeResponse'
+              example:
+                liked: false
+                was_liked: true
+                count: 41
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InvalidUnlikeRequestResponse'
         '401':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedResponse'
         '404':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/ContentNotFoundResponse'
         '429':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/RateLimitedResponse'
         '503':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/DependencyUnavailableResponse'
+        '500':
+          $ref: '#/components/responses/InternalErrorResponse'
   /v1/likes/{content_type}/{content_id}/count:
     get:
       tags: [Likes]
@@ -90,10 +108,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LikeCountResponse'
+              example:
+                content_type: post
+                content_id: 731b0395-4888-4822-b516-05b4b7bf2089
+                count: 41
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InvalidPathRequestResponse'
         '429':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/RateLimitedResponse'
+        '500':
+          $ref: '#/components/responses/InternalErrorResponse'
   /v1/likes/{content_type}/{content_id}/status:
     get:
       tags: [Likes]
@@ -110,12 +134,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LikeStatusResponse'
+              examples:
+                liked:
+                  value:
+                    liked: true
+                    liked_at: '2026-02-02T17:00:00Z'
+                notLiked:
+                  value:
+                    liked: false
+                    liked_at: null
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InvalidPathRequestResponse'
         '401':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailableResponse'
         '500':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InternalErrorResponse'
   /v1/likes/user:
     get:
       tags: [Likes]
@@ -147,14 +182,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserLikesResponse'
+              example:
+                items:
+                  - content_type: post
+                    content_id: 731b0395-4888-4822-b516-05b4b7bf2089
+                    liked_at: '2026-02-02T17:00:00Z'
+                next_cursor: eyJ0IjoiMjAyNi0wMi0wMlQxNjowMDowMFoiLCJpZCI6IjEyMyJ9
+                has_more: true
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/UserLikesBadRequestResponse'
         '401':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedResponse'
         '503':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/DependencyUnavailableResponse'
         '500':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InternalErrorResponse'
   /v1/likes/batch/counts:
     post:
       tags: [Likes]
@@ -172,10 +214,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BatchLikeCountsResponse'
+              example:
+                results:
+                  - content_type: post
+                    content_id: 731b0395-4888-4822-b516-05b4b7bf2089
+                    count: 41
+                  - content_type: bonus_hunter
+                    content_id: c3d4e5f6-a7b8-9012-cdef-123456789012
+                    count: 7
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/BatchCountsBadRequestResponse'
         '429':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/RateLimitedResponse'
+        '500':
+          $ref: '#/components/responses/InternalErrorResponse'
   /v1/likes/batch/statuses:
     post:
       tags: [Likes]
@@ -195,14 +247,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BatchLikeStatusesResponse'
+              example:
+                results:
+                  - content_type: post
+                    content_id: 731b0395-4888-4822-b516-05b4b7bf2089
+                    liked: true
+                    liked_at: '2026-02-02T17:00:00Z'
+                  - content_type: bonus_hunter
+                    content_id: c3d4e5f6-a7b8-9012-cdef-123456789012
+                    liked: false
+                    liked_at: null
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/BatchStatusesBadRequestResponse'
         '401':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/UnauthorizedResponse'
         '503':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/DependencyUnavailableResponse'
         '500':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InternalErrorResponse'
   /v1/likes/top:
     get:
       tags: [Likes]
@@ -232,12 +294,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TopLikesResponse'
+              example:
+                window: 7d
+                content_type: post
+                items:
+                  - content_type: post
+                    content_id: 731b0395-4888-4822-b516-05b4b7bf2089
+                    count: 1547
+                  - content_type: post
+                    content_id: 9601c044-4888-4822-b516-05b4b7bf2999
+                    count: 892
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/TopLikesBadRequestResponse'
         '429':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/RateLimitedResponse'
         '500':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InternalErrorResponse'
   /v1/likes/stream:
     get:
       tags: [Likes]
@@ -271,13 +343,12 @@ paths:
                 heartbeat:
                   value: |-
                     data: {"event":"heartbeat","timestamp":"2026-02-02T17:00:15Z"}
-                shutdown:
-                  value: |-
-                    data: {"event":"shutdown","timestamp":"2026-02-02T17:00:30Z"}
         '400':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/InvalidStreamRequestResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitedResponse'
         '503':
-          $ref: '#/components/responses/ErrorResponse'
+          $ref: '#/components/responses/DependencyUnavailableResponse'
   /health/live:
     get:
       tags: [Health]
@@ -289,6 +360,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LiveHealthResponse'
+              example:
+                status: ok
   /health/ready:
     get:
       tags: [Health]
@@ -300,12 +373,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadyHealthResponse'
+              example:
+                status: ready
+                checks:
+                  postgres: ok
+                  redis: ok
+                  content_api: ok
         '503':
           description: At least one dependency is unavailable
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadyHealthResponse'
+              example:
+                status: not_ready
+                checks:
+                  postgres: ok
+                  redis: failed
+                  content_api: ok
   /metrics:
     get:
       tags: [Observability]
@@ -360,6 +445,286 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    UnauthorizedResponse:
+      description: Missing, malformed, or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: invalid bearer token
+              request_id: req_a1b2c3d4
+    ContentNotFoundResponse:
+      description: Content validation failed against Content API
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: CONTENT_NOT_FOUND
+              message: content not found
+              request_id: req_a1b2c3d4
+              details:
+                content_type: post
+                content_id: 731b0395-4888-4822-b516-05b4b7bf2089
+    DependencyUnavailableResponse:
+      description: External dependency unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: DEPENDENCY_UNAVAILABLE
+              message: dependency unavailable
+              request_id: req_a1b2c3d4
+    InternalErrorResponse:
+      description: Unexpected internal error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: internal error
+              request_id: req_a1b2c3d4
+    RateLimitedResponse:
+      description: Rate limit exceeded
+      headers:
+        x-ratelimit-limit:
+          schema:
+            type: integer
+        x-ratelimit-remaining:
+          schema:
+            type: integer
+        x-ratelimit-reset:
+          schema:
+            type: integer
+        retry-after:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: RATE_LIMITED
+              message: rate limit exceeded
+              request_id: req_a1b2c3d4
+              details:
+                limit: 1000
+                remaining: 0
+                reset_epoch_seconds: 1773770400
+                retry_after_seconds: 60
+    InvalidPathRequestResponse:
+      description: Invalid content_type or content_id
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidContentType:
+              value:
+                error:
+                  code: INVALID_CONTENT_TYPE
+                  message: invalid content type
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_type
+            invalidContentId:
+              value:
+                error:
+                  code: INVALID_CONTENT_ID
+                  message: invalid content id
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_id
+    InvalidLikeRequestResponse:
+      description: Invalid like request payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidContentType:
+              value:
+                error:
+                  code: INVALID_CONTENT_TYPE
+                  message: invalid content type
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_type
+            invalidContentId:
+              value:
+                error:
+                  code: INVALID_CONTENT_ID
+                  message: invalid content id
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_id
+            contentTypeUnknown:
+              value:
+                error:
+                  code: CONTENT_TYPE_UNKNOWN
+                  message: content type unknown
+                  request_id: req_a1b2c3d4
+                  details:
+                    content_type: unknown
+    InvalidUnlikeRequestResponse:
+      description: Invalid unlike request path parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidContentType:
+              value:
+                error:
+                  code: INVALID_CONTENT_TYPE
+                  message: invalid content type
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_type
+            invalidContentId:
+              value:
+                error:
+                  code: INVALID_CONTENT_ID
+                  message: invalid content id
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_id
+            contentTypeUnknown:
+              value:
+                error:
+                  code: CONTENT_TYPE_UNKNOWN
+                  message: content type unknown
+                  request_id: req_a1b2c3d4
+                  details:
+                    content_type: unknown
+    UserLikesBadRequestResponse:
+      description: Invalid user likes request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidCursor:
+              value:
+                error:
+                  code: INVALID_CURSOR
+                  message: invalid cursor
+                  request_id: req_a1b2c3d4
+            invalidLimit:
+              value:
+                error:
+                  code: INVALID_LIMIT
+                  message: invalid limit
+                  request_id: req_a1b2c3d4
+            invalidContentType:
+              value:
+                error:
+                  code: INVALID_CONTENT_TYPE
+                  message: invalid content type
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_type
+    BatchCountsBadRequestResponse:
+      description: Invalid batch counts request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            batchTooLarge:
+              value:
+                error:
+                  code: BATCH_TOO_LARGE
+                  message: batch too large
+                  request_id: req_a1b2c3d4
+            invalidContentId:
+              value:
+                error:
+                  code: INVALID_CONTENT_ID
+                  message: invalid content id
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_id
+    BatchStatusesBadRequestResponse:
+      description: Invalid batch statuses request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            batchTooLarge:
+              value:
+                error:
+                  code: BATCH_TOO_LARGE
+                  message: batch too large
+                  request_id: req_a1b2c3d4
+            invalidContentType:
+              value:
+                error:
+                  code: INVALID_CONTENT_TYPE
+                  message: invalid content type
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_type
+    TopLikesBadRequestResponse:
+      description: Invalid leaderboard request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidWindow:
+              value:
+                error:
+                  code: INVALID_WINDOW
+                  message: invalid window
+                  request_id: req_a1b2c3d4
+            invalidLimit:
+              value:
+                error:
+                  code: INVALID_LIMIT
+                  message: invalid limit
+                  request_id: req_a1b2c3d4
+            invalidContentType:
+              value:
+                error:
+                  code: INVALID_CONTENT_TYPE
+                  message: invalid content type
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_type
+    InvalidStreamRequestResponse:
+      description: Invalid SSE stream query
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidContentType:
+              value:
+                error:
+                  code: INVALID_CONTENT_TYPE
+                  message: invalid content type
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_type
+            invalidContentId:
+              value:
+                error:
+                  code: INVALID_CONTENT_ID
+                  message: invalid content id
+                  request_id: req_a1b2c3d4
+                  details:
+                    field: content_id
   schemas:
     ContentType:
       type: string
