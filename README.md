@@ -111,7 +111,16 @@ Internal mocks used by the service itself:
 - `GET /v1/auth/validate`
 - `GET /v1/{content_type}/{content_id}`
 
-The Docker setup keeps those mock endpoints inside the main app container rather than as separate mock services. That keeps local setup small while preserving the same HTTP contracts used by the app.
+The Docker setup now runs the mocks as separate services in Compose:
+- `social-api`
+- `postgres`
+- `redis`
+- `mock-profile-api`
+- `mock-post-api`
+- `mock-bonus-hunter-api`
+- `mock-top-picks-api`
+
+The three content mock services share the same executable and mock implementation, but run as separate Compose services to match the challenge topology more closely.
 
 ## Quick Examples
 

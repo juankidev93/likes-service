@@ -27,7 +27,7 @@ services:
       timeout: 3s
       retries: 10
 
-  app:
+  social-api:
     build:
       context: .
       network: host
@@ -36,7 +36,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mock-profile-api:
+        condition: service_healthy
+      mock-post-api:
+        condition: service_healthy
+      mock-bonus-hunter-api:
+        condition: service_healthy
+      mock-top-picks-api:
+        condition: service_healthy
     environment:
+      APP_MODE: social-api
       SERVICE_HOST: 0.0.0.0
       HTTP_PORT: 3000
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/likes_service
@@ -55,10 +64,10 @@ services:
       SHUTDOWN_TIMEOUT_SECS: 30
       SSE_HEARTBEAT_INTERVAL_SECS: 15
       LEADERBOARD_REFRESH_INTERVAL_SECS: 60
-      PROFILE_API_URL: http://app:3000
-      CONTENT_API_POST_URL: http://app:3000
-      CONTENT_API_BONUS_HUNTER_URL: http://app:3000
-      CONTENT_API_TOP_PICKS_URL: http://app:3000
+      PROFILE_API_URL: http://mock-profile-api:8084
+      CONTENT_API_POST_URL: http://mock-post-api:8081
+      CONTENT_API_BONUS_HUNTER_URL: http://mock-bonus-hunter-api:8082
+      CONTENT_API_TOP_PICKS_URL: http://mock-top-picks-api:8083
     ports:
       - "3000:3000"
     healthcheck:
@@ -67,6 +76,74 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+
+  mock-profile-api:
+    build:
+      context: .
+      network: host
+    environment:
+      APP_MODE: mock-profile-api
+      SERVICE_HOST: 0.0.0.0
+      HTTP_PORT: 8084
+    ports:
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8084/health/live || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  mock-post-api:
+    build:
+      context: .
+      network: host
+    environment:
+      APP_MODE: mock-content-api
+      SERVICE_HOST: 0.0.0.0
+      HTTP_PORT: 8081
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/health/live || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  mock-bonus-hunter-api:
+    build:
+      context: .
+      network: host
+    environment:
+      APP_MODE: mock-content-api
+      SERVICE_HOST: 0.0.0.0
+      HTTP_PORT: 8082
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8082/health/live || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  mock-top-picks-api:
+    build:
+      context: .
+      network: host
+    environment:
+      APP_MODE: mock-content-api
+      SERVICE_HOST: 0.0.0.0
+      HTTP_PORT: 8083
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8083/health/live || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
 volumes:
   postgres_data:

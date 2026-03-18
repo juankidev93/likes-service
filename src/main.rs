@@ -16,7 +16,7 @@ mod use_cases;
 mod integration_tests;
 
 use config::ServiceConfig;
-use infra::bootstrap::{build_app, build_app_state};
+use infra::bootstrap::{build_app, build_app_state, build_mock_content_app, build_mock_profile_app};
 use infra::logging::init_tracing;
 use infra::metrics::init_metrics;
 use std::net::SocketAddr;
@@ -26,6 +26,13 @@ use std::time::Duration;
 async fn main() {
     init_tracing();
     init_metrics();
+
+    let run_mode = std::env::var("APP_MODE").unwrap_or_else(|_| "social-api".to_string());
+
+    if run_mode == "mock-profile-api" || run_mode == "mock-content-api" {
+        run_mock_service(&run_mode).await;
+        return;
+    }
 
     let config = ServiceConfig::from_env().unwrap_or_else(|error| {
         eprintln!("configuration error: {error}");
@@ -88,6 +95,36 @@ async fn main() {
     }
 
     tracing::info!(service = "likes_service", "HTTP server stopped");
+}
+
+async fn run_mock_service(run_mode: &str) {
+    let host = std::env::var("SERVICE_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port = std::env::var("HTTP_PORT")
+        .unwrap_or_else(|_| "3000".to_string())
+        .parse::<u16>()
+        .unwrap_or_else(|error| {
+            eprintln!("configuration error: HTTP_PORT must be a valid value, got parse error: {error}");
+            std::process::exit(1);
+        });
+    let bind_address = format!("{host}:{port}");
+    let shutdown_handle = crate::infra::shutdown::ShutdownSignal::new();
+
+    let app = match run_mode {
+        "mock-profile-api" => build_mock_profile_app(),
+        "mock-content-api" => build_mock_content_app(),
+        _ => unreachable!("validated above"),
+    };
+
+    let listener = tokio::net::TcpListener::bind(&bind_address)
+        .await
+        .expect("failed to bind TCP listener");
+
+    tracing::info!(service = "likes_service", mode = run_mode, address = %bind_address, "starting mock service");
+
+    axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal(shutdown_handle))
+        .await
+        .expect("HTTP server failed");
 }
 
 async fn shutdown_signal(shutdown_handle: crate::infra::shutdown::ShutdownSignal) {

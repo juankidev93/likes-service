@@ -1,4 +1,4 @@
-use crate::app_state::{AppState, MockProfile};
+use crate::app_state::AppState;
 use crate::config::ServiceConfig;
 use crate::health::ready_health;
 use crate::http::{
@@ -13,12 +13,11 @@ use crate::integrations::content_validation::ContentValidationClient;
 use crate::integrations::profile_api_client::ProfileApiClient;
 use crate::integrations::sse_events::LikeEvents;
 use crate::mock_content_api::{build_mock_content_store, get_content};
-use crate::mock_profile_api::validate_token;
+use crate::mock_profile_api::{build_mock_profiles, validate_token};
 use crate::resilience::circuit_breaker::CircuitBreaker;
 use axum::{Router, middleware, routing::get};
 use redis::AsyncCommands;
 use sqlx::postgres::PgPoolOptions;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -139,46 +138,6 @@ pub fn build_app(app_state: AppState) -> Router {
         .layer(middleware::from_fn(request_logging_middleware))
 }
 
-fn build_mock_profiles() -> HashMap<String, MockProfile> {
-    HashMap::from([
-        (
-            "tok_user_1".to_string(),
-            MockProfile {
-                user_id: "11111111-1111-1111-1111-111111111111".to_string(),
-                display_name: "Test User 1".to_string(),
-            },
-        ),
-        (
-            "tok_user_2".to_string(),
-            MockProfile {
-                user_id: "22222222-2222-2222-2222-222222222222".to_string(),
-                display_name: "Test User 2".to_string(),
-            },
-        ),
-        (
-            "tok_user_3".to_string(),
-            MockProfile {
-                user_id: "33333333-3333-3333-3333-333333333333".to_string(),
-                display_name: "Test User 3".to_string(),
-            },
-        ),
-        (
-            "tok_user_4".to_string(),
-            MockProfile {
-                user_id: "44444444-4444-4444-4444-444444444444".to_string(),
-                display_name: "Test User 4".to_string(),
-            },
-        ),
-        (
-            "tok_user_5".to_string(),
-            MockProfile {
-                user_id: "55555555-5555-5555-5555-555555555555".to_string(),
-                display_name: "Test User 5".to_string(),
-            },
-        ),
-    ])
-}
-
 fn build_content_type_registry(config: &ServiceConfig) -> ContentTypeRegistry {
     ContentTypeRegistry::new(vec![
         ContentApiDefinition {
@@ -224,4 +183,80 @@ async fn validate_required_schema(db_pool: &sqlx::PgPool) {
         );
         std::process::exit(1);
     }
+}
+
+pub fn build_mock_profile_app() -> Router {
+    let state = AppState {
+        db_pool: sqlx::postgres::PgPoolOptions::new().connect_lazy("postgresql://unused").expect("lazy pool"),
+        read_db_pool: sqlx::postgres::PgPoolOptions::new().connect_lazy("postgresql://unused").expect("lazy pool"),
+        redis_client: redis::Client::open("redis://127.0.0.1:6379/").expect("lazy redis client"),
+        redis_connection: None,
+        cache_ttl_like_counts_seconds: 300,
+        cache_ttl_user_status_seconds: 60,
+        leaderboard_refresh_interval_seconds: 60,
+        write_rate_limit_per_minute: 30,
+        read_rate_limit_per_minute: 1000,
+        sse_heartbeat_interval_seconds: 15,
+        local_like_count_cache: Arc::new(Default::default()),
+        like_count_cache_inflight: Arc::new(Default::default()),
+        mock_profiles: build_mock_profiles(),
+        mock_content_store: build_mock_content_store(),
+        content_type_registry: ContentTypeRegistry::new(Vec::new()),
+        content_validation_client: ContentValidationClient::new(
+            ContentTypeRegistry::new(Vec::new()),
+            redis::Client::open("redis://127.0.0.1:6379/").expect("lazy redis client"),
+            3600,
+            CircuitBreaker::new("content_api", 5, Duration::from_secs(30), 3, Duration::from_secs(30)),
+        ),
+        profile_api_client: ProfileApiClient::new(
+            "http://127.0.0.1:1",
+            CircuitBreaker::new("profile_api", 5, Duration::from_secs(30), 3, Duration::from_secs(30)),
+        ),
+        shutdown_signal: ShutdownSignal::new(),
+        like_events: LikeEvents::new(redis::Client::open("redis://127.0.0.1:6379/").expect("lazy redis client")),
+    };
+
+    Router::new()
+        .route("/health/live", get(live_health))
+        .route("/v1/auth/validate", get(validate_token))
+        .with_state(state)
+        .layer(middleware::from_fn(request_logging_middleware))
+}
+
+pub fn build_mock_content_app() -> Router {
+    let state = AppState {
+        db_pool: sqlx::postgres::PgPoolOptions::new().connect_lazy("postgresql://unused").expect("lazy pool"),
+        read_db_pool: sqlx::postgres::PgPoolOptions::new().connect_lazy("postgresql://unused").expect("lazy pool"),
+        redis_client: redis::Client::open("redis://127.0.0.1:6379/").expect("lazy redis client"),
+        redis_connection: None,
+        cache_ttl_like_counts_seconds: 300,
+        cache_ttl_user_status_seconds: 60,
+        leaderboard_refresh_interval_seconds: 60,
+        write_rate_limit_per_minute: 30,
+        read_rate_limit_per_minute: 1000,
+        sse_heartbeat_interval_seconds: 15,
+        local_like_count_cache: Arc::new(Default::default()),
+        like_count_cache_inflight: Arc::new(Default::default()),
+        mock_profiles: build_mock_profiles(),
+        mock_content_store: build_mock_content_store(),
+        content_type_registry: ContentTypeRegistry::new(Vec::new()),
+        content_validation_client: ContentValidationClient::new(
+            ContentTypeRegistry::new(Vec::new()),
+            redis::Client::open("redis://127.0.0.1:6379/").expect("lazy redis client"),
+            3600,
+            CircuitBreaker::new("content_api", 5, Duration::from_secs(30), 3, Duration::from_secs(30)),
+        ),
+        profile_api_client: ProfileApiClient::new(
+            "http://127.0.0.1:1",
+            CircuitBreaker::new("profile_api", 5, Duration::from_secs(30), 3, Duration::from_secs(30)),
+        ),
+        shutdown_signal: ShutdownSignal::new(),
+        like_events: LikeEvents::new(redis::Client::open("redis://127.0.0.1:6379/").expect("lazy redis client")),
+    };
+
+    Router::new()
+        .route("/health/live", get(live_health))
+        .route("/v1/{content_type}/{content_id}", get(get_content))
+        .with_state(state)
+        .layer(middleware::from_fn(request_logging_middleware))
 }
