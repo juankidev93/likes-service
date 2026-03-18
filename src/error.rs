@@ -352,7 +352,7 @@ mod tests {
     fn content_validation_not_found_maps_to_404() {
         let error = AppError::from(ContentValidationError::ContentNotFound {
             content_type: "post".to_string(),
-            content_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1".to_string(),
+            content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
         });
 
         let (status, code, message, details) = error.as_http_error();
@@ -364,7 +364,7 @@ mod tests {
             details,
             Some(json!({
                 "content_type": "post",
-                "content_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+                "content_id": "731b0395-4888-4822-b516-05b4b7bf2089",
             }))
         );
     }

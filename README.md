@@ -130,13 +130,13 @@ Create a like:
 curl -i -X POST http://127.0.0.1:8080/v1/likes \
   -H 'Authorization: Bearer tok_user_1' \
   -H 'content-type: application/json' \
-  -d '{"content_type":"post","content_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"}'
+  -d '{"content_type":"post","content_id":"731b0395-4888-4822-b516-05b4b7bf2089"}'
 ```
 
 Get the count:
 
 ```bash
-curl -i http://127.0.0.1:8080/v1/likes/post/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1/count
+curl -i http://127.0.0.1:8080/v1/likes/post/731b0395-4888-4822-b516-05b4b7bf2089/count
 ```
 
 Get top likes:
@@ -154,7 +154,7 @@ curl -i 'http://127.0.0.1:8080/v1/likes/top?content_type=post&window=7d&limit=10
 Open the SSE stream:
 
 ```bash
-curl -N 'http://127.0.0.1:8080/v1/likes/stream?content_type=post&content_id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'
+curl -N 'http://127.0.0.1:8080/v1/likes/stream?content_type=post&content_id=731b0395-4888-4822-b516-05b4b7bf2089'
 ```
 
 ## Pagination
