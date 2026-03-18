@@ -10,6 +10,7 @@ use crate::integrations::sse_events::LikeEvents;
 use redis::Client as RedisClient;
 use redis::aio::MultiplexedConnection;
 use sqlx::PgPool;
+use tokio::sync::{Mutex, Notify};
 
 #[allow(dead_code)]
 #[derive(Clone)]
@@ -23,6 +24,7 @@ pub struct AppState {
     pub read_rate_limit_per_minute: u32,
     pub sse_heartbeat_interval_seconds: u64,
     pub local_like_count_cache: Arc<LocalLikeCountCache>,
+    pub like_count_cache_inflight: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
     pub mock_profiles: HashMap<String, MockProfile>,
     pub mock_content_store: HashMap<String, HashSet<String>>,
     pub content_type_registry: ContentTypeRegistry,
@@ -57,6 +59,37 @@ impl AppState {
 
         self.redis_client.get_multiplexed_async_connection().await
     }
+
+    pub async fn begin_like_count_fill(&self, key: &str) -> LikeCountFillPermit {
+        let mut inflight = self.like_count_cache_inflight.lock().await;
+
+        if let Some(notify) = inflight.get(key) {
+            return LikeCountFillPermit::Follower(notify.clone());
+        }
+
+        let notify = Arc::new(Notify::new());
+        inflight.insert(key.to_string(), notify.clone());
+
+        LikeCountFillPermit::Leader(notify)
+    }
+
+    pub async fn finish_like_count_fill(&self, key: &str, notify: &Arc<Notify>) {
+        let mut inflight = self.like_count_cache_inflight.lock().await;
+
+        if inflight
+            .get(key)
+            .is_some_and(|current| Arc::ptr_eq(current, notify))
+        {
+            inflight.remove(key);
+        }
+
+        notify.notify_waiters();
+    }
+}
+
+pub enum LikeCountFillPermit {
+    Leader(Arc<Notify>),
+    Follower(Arc<Notify>),
 }
 
 impl LocalLikeCountCache {

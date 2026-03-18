@@ -1,4 +1,4 @@
-use crate::app_state::AppState;
+use crate::app_state::{AppState, LikeCountFillPermit};
 use crate::error::AppError;
 use crate::infra::metrics::record_cache_operation;
 use crate::integrations::profile_api_client::AuthenticatedUser;
@@ -67,27 +67,88 @@ pub(crate) async fn get_like_counts_batch(
 
     if !missing_items.is_empty() {
         let repository = PostgresLikesRepository::new(&state.read_db_pool);
-        let postgres_counts = match repository.get_like_counts_batch(&missing_items).await {
-            Ok(values) => values,
-            Err(error) => return error.into_response(),
-        };
+        let mut leader_items = Vec::new();
 
         for (content_type, content_id) in &missing_items {
-            let key = (content_type.to_string(), content_id.to_string());
-            let count = *postgres_counts.get(&key).unwrap_or(&0);
+            let cache_key = like_count_cache_key(content_type, content_id);
 
-            counts_by_item.insert(key.clone(), count);
+            match state.begin_like_count_fill(&cache_key).await {
+                LikeCountFillPermit::Leader(notify) => {
+                    leader_items.push((content_type.clone(), content_id.clone(), cache_key, notify));
+                }
+                LikeCountFillPermit::Follower(notify) => {
+                    notify.notified().await;
 
-            if let Err(error) =
-                cache_like_count(&state, &like_count_cache_key(content_type, content_id), count)
-                    .await
-            {
-                record_cache_operation("get_like_counts_batch", "error");
-                tracing::warn!(
-                    service = "likes_service",
-                    error = %error,
-                    "failed to populate redis cache for get_like_counts_batch"
-                );
+                    match get_cached_like_counts(&state, std::slice::from_ref(&cache_key)).await {
+                        Ok(values) => {
+                            if let Some(Some(count)) = values.into_iter().next() {
+                                counts_by_item.insert(
+                                    (content_type.to_string(), content_id.to_string()),
+                                    count,
+                                );
+                            } else {
+                                let retry_notify = match state.begin_like_count_fill(&cache_key).await {
+                                    LikeCountFillPermit::Leader(notify) => notify,
+                                    LikeCountFillPermit::Follower(notify) => {
+                                        notify.notified().await;
+                                        continue;
+                                    }
+                                };
+
+                                leader_items.push((
+                                    content_type.clone(),
+                                    content_id.clone(),
+                                    cache_key,
+                                    retry_notify,
+                                ));
+                            }
+                        }
+                        Err(error) => {
+                            record_cache_operation("get_like_counts_batch", "error");
+                            tracing::warn!(
+                                service = "likes_service",
+                                error = %error,
+                                "redis unavailable after waiting for get_like_counts_batch fill"
+                            );
+                            leader_items.push((content_type.clone(), content_id.clone(), cache_key, notify));
+                        }
+                    }
+                }
+            }
+        }
+
+        if !leader_items.is_empty() {
+            let leader_refs: Vec<(crate::domain::ContentType, crate::domain::ContentId)> = leader_items
+                .iter()
+                .map(|(content_type, content_id, _, _)| (content_type.clone(), content_id.clone()))
+                .collect();
+
+            let postgres_counts = match repository.get_like_counts_batch(&leader_refs).await {
+                Ok(values) => values,
+                Err(error) => {
+                    for (_, _, cache_key, notify) in &leader_items {
+                        state.finish_like_count_fill(cache_key, notify).await;
+                    }
+                    return error.into_response();
+                }
+            };
+
+            for (content_type, content_id, cache_key, notify) in leader_items {
+                let key = (content_type.to_string(), content_id.to_string());
+                let count = *postgres_counts.get(&key).unwrap_or(&0);
+
+                counts_by_item.insert(key.clone(), count);
+
+                if let Err(error) = cache_like_count(&state, &cache_key, count).await {
+                    record_cache_operation("get_like_counts_batch", "error");
+                    tracing::warn!(
+                        service = "likes_service",
+                        error = %error,
+                        "failed to populate redis cache for get_like_counts_batch"
+                    );
+                }
+
+                state.finish_like_count_fill(&cache_key, &notify).await;
             }
         }
     }

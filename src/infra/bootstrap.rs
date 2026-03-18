@@ -106,6 +106,7 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
         read_rate_limit_per_minute: config.read_rate_limit_per_minute,
         sse_heartbeat_interval_seconds: config.sse_heartbeat_interval_seconds,
         local_like_count_cache: Arc::new(Default::default()),
+        like_count_cache_inflight: Arc::new(Default::default()),
         mock_profiles,
         mock_content_store,
         content_type_registry,

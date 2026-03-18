@@ -1,4 +1,4 @@
-use crate::app_state::AppState;
+use crate::app_state::{AppState, LikeCountFillPermit};
 use crate::domain::{ContentId, ContentType};
 use crate::error::AppError;
 use crate::infra::metrics::record_cache_operation;
@@ -222,20 +222,55 @@ pub(crate) async fn get_like_count(
         }
     }
 
-    match repository.get_like_count(&content_type, &content_id).await {
-        Ok(count) => {
-            if let Err(error) = cache_like_count(&state, &cache_key, count.count).await {
-                record_cache_operation("get_like_count", "error");
-                tracing::warn!(service = "likes_service", error = %error, "failed to populate redis cache for get_like_count");
-            }
+    loop {
+        match state.begin_like_count_fill(&cache_key).await {
+            LikeCountFillPermit::Leader(notify) => {
+                let result = repository.get_like_count(&content_type, &content_id).await;
+                state.finish_like_count_fill(&cache_key, &notify).await;
 
-            success(Json(LikeCountResponse::from_parts(
-                &content_type,
-                &content_id,
-                count.count,
-            )))
-            .into_response()
+                match result {
+                    Ok(count) => {
+                        if let Err(error) = cache_like_count(&state, &cache_key, count.count).await {
+                            record_cache_operation("get_like_count", "error");
+                            tracing::warn!(service = "likes_service", error = %error, "failed to populate redis cache for get_like_count");
+                        }
+
+                        return success(Json(LikeCountResponse::from_parts(
+                            &content_type,
+                            &content_id,
+                            count.count,
+                        )))
+                        .into_response();
+                    }
+                    Err(error) => return error.into_response(),
+                }
+            }
+            LikeCountFillPermit::Follower(notify) => {
+                notify.notified().await;
+
+                match get_cached_like_count(&state, &cache_key).await {
+                    Ok(Some(count)) => {
+                        record_cache_operation("get_like_count", "hit");
+                        return success(Json(LikeCountResponse {
+                            content_type: content_type.to_string(),
+                            content_id: content_id.to_string(),
+                            count,
+                        }))
+                        .into_response();
+                    }
+                    Ok(None) => {
+                        continue;
+                    }
+                    Err(error) => {
+                        record_cache_operation("get_like_count", "error");
+                        tracing::warn!(
+                            service = "likes_service",
+                            error = %error,
+                            "redis unavailable after waiting for get_like_count fill, falling back to leader path"
+                        );
+                    }
+                }
+            }
         }
-        Err(error) => error.into_response(),
     }
 }
