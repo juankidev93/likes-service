@@ -2,7 +2,8 @@ FROM rust:1-bookworm AS builder
 
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
+COPY proto ./proto
 COPY openapi.yaml ./
 COPY src ./src
 
