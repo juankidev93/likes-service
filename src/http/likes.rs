@@ -17,8 +17,8 @@ use super::dto::{
     CreateLikeRequest, LikeCountResponse, LikeResponse, LikeStatusResponse, UnlikeResponse,
 };
 use super::helpers::{
-    cache_like_count, get_cached_like_count, like_count_cache_key, parse_authenticated_user_id,
-    store_local_like_count, success,
+    cache_like_count, cache_like_status, get_cached_like_count, get_cached_like_status,
+    like_count_cache_key, parse_authenticated_user_id, store_local_like_count, success,
 };
 
 pub(crate) async fn create_like(
@@ -78,6 +78,26 @@ pub(crate) async fn create_like(
                 {
                     tracing::warn!(service = "likes_service", error = %error, "failed to publish like event");
                 }
+            }
+
+            let status_response = LikeStatusResponse {
+                liked: true,
+                liked_at: result.liked_at.clone(),
+            };
+            if let Err(error) = cache_like_status(
+                &state,
+                &user_id,
+                &content_type,
+                &content_id,
+                &status_response,
+            )
+            .await
+            {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "failed to update cached like status for like"
+                );
             }
 
             let status = if result.already_existed {
@@ -145,6 +165,26 @@ pub(crate) async fn delete_like(
                 }
             }
 
+            let status_response = LikeStatusResponse {
+                liked: false,
+                liked_at: None,
+            };
+            if let Err(error) = cache_like_status(
+                &state,
+                &user_id,
+                &content_type,
+                &content_id,
+                &status_response,
+            )
+            .await
+            {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "failed to update cached like status for unlike"
+                );
+            }
+
             success(Json(UnlikeResponse::from(result))).into_response()
         }
         Err(error) => error.into_response(),
@@ -173,11 +213,33 @@ pub(crate) async fn get_like_status(
 
     let repository = PostgresLikesRepository::new(&state.read_db_pool);
 
+    match get_cached_like_status(&state, &user_id, &content_type, &content_id).await {
+        Ok(Some(status)) => return success(Json(status)).into_response(),
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(
+                service = "likes_service",
+                error = %error,
+                "redis unavailable for get_like_status, falling back to postgres"
+            );
+        }
+    }
+
     match repository
         .get_like_status(&user_id, &content_type, &content_id)
         .await
     {
-        Ok(status) => success(Json(LikeStatusResponse::from(status))).into_response(),
+        Ok(status) => {
+            let response = LikeStatusResponse::from(status);
+            if let Err(error) = cache_like_status(&state, &user_id, &content_type, &content_id, &response).await {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "failed to populate cached like status"
+                );
+            }
+            success(Json(response)).into_response()
+        }
         Err(error) => error.into_response(),
     }
 }

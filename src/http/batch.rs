@@ -15,8 +15,8 @@ use super::dto::{
     BatchLikeStatusesResponse, BatchLikesRequest,
 };
 use super::helpers::{
-    cache_like_count, get_cached_like_counts, like_count_cache_key, parse_authenticated_user_id,
-    parse_batch_items, success, MAX_BATCH_ITEMS,
+    cache_like_count, cache_like_status, get_cached_like_counts, get_cached_like_status,
+    like_count_cache_key, parse_authenticated_user_id, parse_batch_items, success, MAX_BATCH_ITEMS,
 };
 
 pub(crate) async fn get_like_counts_batch(
@@ -186,29 +186,85 @@ pub(crate) async fn get_like_statuses_batch(
         Err(error) => return error.into_response(),
     };
 
-    let repository = PostgresLikesRepository::new(&state.read_db_pool);
-    let statuses = match repository
-        .get_like_statuses_batch(&user_id, &parsed_items)
-        .await
-    {
-        Ok(values) => values,
-        Err(error) => return error.into_response(),
-    };
+    let mut cached_statuses = HashMap::new();
+    let mut missing_items = Vec::new();
 
-    let items = parsed_items
-        .into_iter()
-        .map(|(content_type, content_id)| {
-            let key = (content_type.to_string(), content_id.to_string());
-            let status = statuses.get(&key);
+    for (content_type, content_id) in &parsed_items {
+        match get_cached_like_status(&state, &user_id, content_type, content_id).await {
+            Ok(Some(status)) => {
+                cached_statuses.insert(
+                    (content_type.to_string(), content_id.to_string()),
+                    status,
+                );
+            }
+            Ok(None) => missing_items.push((content_type.clone(), content_id.clone())),
+            Err(error) => {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "redis unavailable for batch like statuses, falling back to postgres"
+                );
+                missing_items.push((content_type.clone(), content_id.clone()));
+            }
+        }
+    }
 
-            BatchLikeStatusItemResponse {
+    let mut statuses = HashMap::new();
+    if !missing_items.is_empty() {
+        let repository = PostgresLikesRepository::new(&state.read_db_pool);
+        statuses = match repository
+            .get_like_statuses_batch(&user_id, &missing_items)
+            .await
+        {
+            Ok(values) => values,
+            Err(error) => return error.into_response(),
+        };
+    }
+
+    let mut items = Vec::with_capacity(parsed_items.len());
+    for (content_type, content_id) in parsed_items {
+        let key = (content_type.to_string(), content_id.to_string());
+
+        if let Some(cached) = cached_statuses.get(&key) {
+            items.push(BatchLikeStatusItemResponse {
                 content_type: key.0,
                 content_id: key.1,
-                liked: status.map(|value| value.exists).unwrap_or(false),
-                liked_at: status.and_then(|value| value.liked_at.clone()),
-            }
-        })
-        .collect();
+                liked: cached.liked,
+                liked_at: cached.liked_at.clone(),
+            });
+            continue;
+        }
+
+        let status = statuses.get(&key);
+        let response = BatchLikeStatusItemResponse {
+            content_type: key.0,
+            content_id: key.1,
+            liked: status.map(|value| value.exists).unwrap_or(false),
+            liked_at: status.and_then(|value| value.liked_at.clone()),
+        };
+
+        let cache_payload = super::dto::LikeStatusResponse {
+            liked: response.liked,
+            liked_at: response.liked_at.clone(),
+        };
+        if let Err(error) = cache_like_status(
+            &state,
+            &user_id,
+            &content_type,
+            &content_id,
+            &cache_payload,
+        )
+        .await
+        {
+            tracing::warn!(
+                service = "likes_service",
+                error = %error,
+                "failed to populate cached batch like status"
+            );
+        }
+
+        items.push(response);
+    }
 
     success(Json(BatchLikeStatusesResponse { results: items })).into_response()
 }

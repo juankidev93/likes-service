@@ -102,6 +102,8 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
         redis_client,
         redis_connection: Some(redis_connection.clone()),
         cache_ttl_like_counts_seconds: config.cache_ttl_like_counts_seconds,
+        cache_ttl_user_status_seconds: config.cache_ttl_user_status_seconds,
+        leaderboard_refresh_interval_seconds: config.leaderboard_refresh_interval_seconds,
         write_rate_limit_per_minute: config.write_rate_limit_per_minute,
         read_rate_limit_per_minute: config.read_rate_limit_per_minute,
         sse_heartbeat_interval_seconds: config.sse_heartbeat_interval_seconds,

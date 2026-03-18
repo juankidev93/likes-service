@@ -75,7 +75,7 @@ impl From<UnlikeContentResult> for UnlikeResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct LikeStatusResponse {
     pub(crate) liked: bool,
     pub(crate) liked_at: Option<String>,
@@ -150,14 +150,14 @@ pub(crate) struct UserLikeItemResponse {
     pub(crate) liked_at: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct TopLikesResponse {
     pub(crate) window: String,
     pub(crate) content_type: Option<String>,
     pub(crate) items: Vec<TopLikeItemResponse>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct TopLikeItemResponse {
     pub(crate) content_type: String,
     pub(crate) content_id: String,

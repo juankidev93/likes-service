@@ -20,6 +20,8 @@ pub struct AppState {
     pub redis_client: RedisClient,
     pub redis_connection: Option<MultiplexedConnection>,
     pub cache_ttl_like_counts_seconds: u64,
+    pub cache_ttl_user_status_seconds: u64,
+    pub leaderboard_refresh_interval_seconds: u64,
     pub write_rate_limit_per_minute: u32,
     pub read_rate_limit_per_minute: u32,
     pub sse_heartbeat_interval_seconds: u64,

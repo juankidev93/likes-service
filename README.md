@@ -74,6 +74,7 @@ Primary variables used by this service:
 
 They are already configured for local development in `docker-compose.yml`, and `.env.example` mirrors the same setup for host-based runs.
 The service fails fast on startup if required connection settings or external dependency URLs are missing.
+`CACHE_TTL_USER_STATUS_SECS` controls the Redis TTL for authenticated like-status responses, and `LEADERBOARD_REFRESH_INTERVAL_SECS` controls the Redis TTL for cached leaderboard responses.
 
 ## Tests
 
@@ -169,8 +170,9 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaa
 - Content validation results are cached in Redis with a bounded TTL. Both `200` and `404` outcomes are cacheable, which reduces repeated dependency calls for hot content IDs.
 - Count cache entries use a bounded TTL and are also refreshed opportunistically on writes. In practice this keeps the maximum staleness window bounded by `CACHE_TTL_LIKE_COUNTS_SECS`, while still healing naturally after a Redis restart or cold start.
 - Count cache repopulation uses a simple single-flight strategy per key. When a hot key expires, only one request repopulates it from Postgres while concurrent requests wait for the refreshed value instead of stampeding the database.
-- User like status is not cached separately. The read is already a targeted indexed lookup in Postgres, and skipping that extra cache layer keeps invalidation simpler for now.
+- Authenticated like-status responses are cached in Redis for `CACHE_TTL_USER_STATUS_SECS`, and `like` / `unlike` refresh that cache directly after writes.
 - `GET /v1/likes/top` uses persisted totals for `window=all` and hourly preaggregation for `24h`, `7d`, and `30d`. This is simpler and more scalable than aggregating directly from `likes` on every request, while staying easier to review than a more advanced pipeline.
+- `GET /v1/likes/top` responses are cached in Redis per `(window, content_type, limit)` combination for `LEADERBOARD_REFRESH_INTERVAL_SECS`.
 - `GET /v1/likes/stream` uses Redis Pub/Sub. This makes the stream work across instances that share Redis, without introducing a heavier event system.
 - Circuit breakers and rate limiters are intentionally simple. They provide operational protection and visibility without adding too much state-machine complexity to the codebase.
 

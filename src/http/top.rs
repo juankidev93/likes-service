@@ -10,7 +10,10 @@ use axum::{
 use std::str::FromStr;
 
 use super::dto::{TopLikeItemResponse, TopLikesQuery, TopLikesResponse};
-use super::helpers::{parse_top_likes_limit, parse_top_likes_window, success};
+use super::helpers::{
+    cache_top_likes, get_cached_top_likes, parse_top_likes_limit, parse_top_likes_window, success,
+    top_likes_cache_key,
+};
 
 pub(crate) async fn get_top_likes(
     State(state): State<AppState>,
@@ -29,17 +32,40 @@ pub(crate) async fn build_top_likes_response(
     let window = parse_top_likes_window(query.window.as_deref())?;
     let limit = parse_top_likes_limit(query.limit)?;
     let content_type = parse_top_likes_content_type(query.content_type.as_deref())?;
+    let cache_key = top_likes_cache_key(&window, content_type.as_ref(), limit);
+
+    match get_cached_top_likes(state, &cache_key).await {
+        Ok(Some(response)) => return Ok(response),
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(
+                service = "likes_service",
+                error = %error,
+                "redis unavailable for top likes cache, falling back to postgres"
+            );
+        }
+    }
 
     let repository = PostgresLikesRepository::new(&state.read_db_pool);
     let rows = repository
         .list_top_likes(content_type.as_ref(), &window, limit)
         .await?;
 
-    Ok(TopLikesResponse {
+    let response = TopLikesResponse {
         window: window.as_str().to_string(),
         content_type: content_type.as_ref().map(ToString::to_string),
         items: rows.into_iter().map(map_top_like_row).collect(),
-    })
+    };
+
+    if let Err(error) = cache_top_likes(state, &cache_key, &response).await {
+        tracing::warn!(
+            service = "likes_service",
+            error = %error,
+            "failed to populate top likes cache"
+        );
+    }
+
+    Ok(response)
 }
 
 fn parse_top_likes_content_type(

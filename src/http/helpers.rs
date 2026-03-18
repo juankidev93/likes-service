@@ -6,10 +6,11 @@ use crate::storage::likes_repository::{LikesCursor, TopLikesWindow, UserLikeRow}
 use axum::{http::StatusCode, Json};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use redis::AsyncCommands;
+use serde::{Serialize, de::DeserializeOwned};
 use std::str::FromStr;
 use std::time::Duration;
 
-use super::dto::BatchLikeItemRequest;
+use super::dto::{BatchLikeItemRequest, LikeStatusResponse, TopLikesResponse};
 
 const DEFAULT_USER_LIKES_LIMIT: usize = 20;
 pub(super) const MAX_BATCH_ITEMS: usize = 100;
@@ -29,6 +30,25 @@ pub(super) fn success<T>(payload: Json<T>) -> (StatusCode, Json<T>) {
 
 pub(super) fn like_count_cache_key(content_type: &ContentType, content_id: &ContentId) -> String {
     format!("likes:count:{content_type}:{content_id}")
+}
+
+pub(super) fn like_status_cache_key(
+    user_id: &UserId,
+    content_type: &ContentType,
+    content_id: &ContentId,
+) -> String {
+    format!("likes:status:{user_id}:{content_type}:{content_id}")
+}
+
+pub(super) fn top_likes_cache_key(
+    window: &TopLikesWindow,
+    content_type: Option<&ContentType>,
+    limit: usize,
+) -> String {
+    let content_type = content_type
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "all".to_string());
+    format!("likes:top:{}:{}:{}", window.as_str(), content_type, limit)
 }
 
 pub(super) fn parse_limit(limit: Option<usize>) -> Result<usize, AppError> {
@@ -163,6 +183,92 @@ pub(super) async fn cache_like_count(
         .set_ex(key, count, state.cache_ttl_like_counts_seconds)
         .await?;
     Ok(())
+}
+
+pub(super) async fn get_cached_json<T>(state: &AppState, key: &str) -> Result<Option<T>, AppError>
+where
+    T: DeserializeOwned,
+{
+    let mut redis_connection = state.get_redis_connection().await?;
+    let payload: Option<String> = redis_connection.get(key).await?;
+
+    match payload {
+        Some(value) => match serde_json::from_str::<T>(&value) {
+            Ok(decoded) => Ok(Some(decoded)),
+            Err(error) => {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    cache_key = key,
+                    "failed to decode cached value"
+                );
+                Ok(None)
+            }
+        },
+        None => Ok(None),
+    }
+}
+
+pub(super) async fn set_cached_json<T>(
+    state: &AppState,
+    key: &str,
+    ttl_seconds: u64,
+    value: &T,
+) -> Result<(), AppError>
+where
+    T: Serialize,
+{
+    let payload = serde_json::to_string(value).map_err(|error| {
+        AppError::dependency_unavailable(
+            "CACHE_SERIALIZATION_ERROR",
+            format!("failed to encode cached value: {error}"),
+        )
+    })?;
+    let mut redis_connection = state.get_redis_connection().await?;
+    let _: () = redis_connection.set_ex(key, payload, ttl_seconds).await?;
+    Ok(())
+}
+
+pub(super) async fn get_cached_like_status(
+    state: &AppState,
+    user_id: &UserId,
+    content_type: &ContentType,
+    content_id: &ContentId,
+) -> Result<Option<LikeStatusResponse>, AppError> {
+    let key = like_status_cache_key(user_id, content_type, content_id);
+    get_cached_json(state, &key).await
+}
+
+pub(super) async fn cache_like_status(
+    state: &AppState,
+    user_id: &UserId,
+    content_type: &ContentType,
+    content_id: &ContentId,
+    status: &LikeStatusResponse,
+) -> Result<(), AppError> {
+    let key = like_status_cache_key(user_id, content_type, content_id);
+    set_cached_json(state, &key, state.cache_ttl_user_status_seconds, status).await
+}
+
+pub(super) async fn get_cached_top_likes(
+    state: &AppState,
+    key: &str,
+) -> Result<Option<TopLikesResponse>, AppError> {
+    get_cached_json(state, key).await
+}
+
+pub(super) async fn cache_top_likes(
+    state: &AppState,
+    key: &str,
+    response: &TopLikesResponse,
+) -> Result<(), AppError> {
+    set_cached_json(
+        state,
+        key,
+        state.leaderboard_refresh_interval_seconds,
+        response,
+    )
+    .await
 }
 
 pub(super) fn store_local_like_count(state: &AppState, key: &str, count: i64) {
