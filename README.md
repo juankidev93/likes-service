@@ -188,6 +188,11 @@ OpenAPI:
 - The HTTP contract is documented in [openapi.yaml](openapi.yaml).
 - Swagger UI is served at `/docs` and uses `/openapi.yaml` from the same origin.
 
+gRPC proto definitions:
+- The repository includes [proto/likes.proto](proto/likes.proto) as a bonus contract definition for the same likes domain.
+- This is not a running gRPC server. The implemented interface of this project is still the HTTP API documented in OpenAPI.
+- The proto mirrors the same core operations and message shapes so the service contract could be exposed over gRPC later without redesigning the domain model.
+
 k6 load testing:
 - The repository includes [k6/load-test.js](k6/load-test.js) to validate the challenge hot paths.
 - Supported modes:

@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package social.likes.v1;
+
+option java_multiple_files = true;
+option java_package = "com.social.likes.v1";
+option java_outer_classname = "LikesProto";
+
+service LikesService {
+  rpc Like(LikeRequest) returns (LikeResponse);
+  rpc Unlike(UnlikeRequest) returns (UnlikeResponse);
+  rpc GetLikeCount(GetLikeCountRequest) returns (GetLikeCountResponse);
+  rpc GetLikeStatus(GetLikeStatusRequest) returns (GetLikeStatusResponse);
+  rpc GetUserLikes(GetUserLikesRequest) returns (GetUserLikesResponse);
+  rpc BatchGetLikeCounts(BatchGetLikeCountsRequest) returns (BatchGetLikeCountsResponse);
+  rpc BatchGetLikeStatuses(BatchGetLikeStatusesRequest) returns (BatchGetLikeStatusesResponse);
+  rpc GetTopLikes(GetTopLikesRequest) returns (GetTopLikesResponse);
+}
+
+enum ContentType {
+  CONTENT_TYPE_UNSPECIFIED = 0;
+  CONTENT_TYPE_POST = 1;
+  CONTENT_TYPE_BONUS_HUNTER = 2;
+  CONTENT_TYPE_TOP_PICKS = 3;
+}
+
+enum TopLikesWindow {
+  TOP_LIKES_WINDOW_UNSPECIFIED = 0;
+  TOP_LIKES_WINDOW_24H = 1;
+  TOP_LIKES_WINDOW_7D = 2;
+  TOP_LIKES_WINDOW_30D = 3;
+  TOP_LIKES_WINDOW_ALL = 4;
+}
+
+message ContentRef {
+  ContentType content_type = 1;
+  string content_id = 2;
+}
+
+message LikeRequest {
+  string session_token = 1;
+  ContentType content_type = 2;
+  string content_id = 3;
+}
+
+message LikeResponse {
+  bool liked = 1;
+  bool already_existed = 2;
+  int64 count = 3;
+  optional string liked_at = 4;
+}
+
+message UnlikeRequest {
+  string session_token = 1;
+  ContentType content_type = 2;
+  string content_id = 3;
+}
+
+message UnlikeResponse {
+  bool liked = 1;
+  bool was_liked = 2;
+  int64 count = 3;
+}
+
+message GetLikeCountRequest {
+  ContentType content_type = 1;
+  string content_id = 2;
+}
+
+message GetLikeCountResponse {
+  ContentType content_type = 1;
+  string content_id = 2;
+  int64 count = 3;
+}
+
+message GetLikeStatusRequest {
+  string session_token = 1;
+  ContentType content_type = 2;
+  string content_id = 3;
+}
+
+message GetLikeStatusResponse {
+  bool liked = 1;
+  optional string liked_at = 2;
+}
+
+message GetUserLikesRequest {
+  string session_token = 1;
+  optional ContentType content_type = 2;
+  optional string cursor = 3;
+  optional uint32 limit = 4;
+}
+
+message UserLikeItem {
+  ContentType content_type = 1;
+  string content_id = 2;
+  string liked_at = 3;
+}
+
+message GetUserLikesResponse {
+  repeated UserLikeItem items = 1;
+  optional string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message BatchGetLikeCountsRequest {
+  repeated ContentRef items = 1;
+}
+
+message BatchLikeCountItem {
+  ContentType content_type = 1;
+  string content_id = 2;
+  int64 count = 3;
+}
+
+message BatchGetLikeCountsResponse {
+  repeated BatchLikeCountItem results = 1;
+}
+
+message BatchGetLikeStatusesRequest {
+  string session_token = 1;
+  repeated ContentRef items = 2;
+}
+
+message BatchLikeStatusItem {
+  ContentType content_type = 1;
+  string content_id = 2;
+  bool liked = 3;
+  optional string liked_at = 4;
+}
+
+message BatchGetLikeStatusesResponse {
+  repeated BatchLikeStatusItem results = 1;
+}
+
+message GetTopLikesRequest {
+  optional ContentType content_type = 1;
+  TopLikesWindow window = 2;
+  optional uint32 limit = 3;
+}
+
+message TopLikeItem {
+  ContentType content_type = 1;
+  string content_id = 2;
+  int64 count = 3;
+}
+
+message GetTopLikesResponse {
+  TopLikesWindow window = 1;
+  optional ContentType content_type = 2;
+  repeated TopLikeItem items = 3;
+}
+
+message ErrorDetail {
+  string code = 1;
+  string message = 2;
+  optional string request_id = 3;
+}
