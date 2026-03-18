@@ -3,7 +3,7 @@ use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
 use crate::integrations::profile_api_client::AuthenticatedUser;
 use crate::storage::likes_repository::{LikesCursor, TopLikesWindow, UserLikeRow};
-use axum::{Json, http::StatusCode};
+use axum::{http::StatusCode, Json};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use redis::AsyncCommands;
 use std::str::FromStr;
@@ -15,7 +15,7 @@ const DEFAULT_USER_LIKES_LIMIT: usize = 20;
 pub(super) const MAX_BATCH_ITEMS: usize = 100;
 const DEFAULT_TOP_LIKES_LIMIT: usize = 10;
 const MAX_TOP_LIKES_LIMIT: usize = 50;
-const LOCAL_LIKE_COUNT_CACHE_TTL_MS: u64 = 250;
+const LOCAL_LIKE_COUNT_CACHE_TTL_MS: u64 = 5000;
 
 pub(super) fn parse_authenticated_user_id(
     authenticated_user: &AuthenticatedUser,

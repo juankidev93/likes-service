@@ -55,7 +55,14 @@ pub(crate) async fn create_like(
     {
         Ok(result) => {
             let cache_key = like_count_cache_key(&content_type, &content_id);
-            store_local_like_count(&state, &cache_key, result.count);
+            if let Err(error) = cache_like_count(&state, &cache_key, result.count).await {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "failed to update redis cache for like"
+                );
+                store_local_like_count(&state, &cache_key, result.count);
+            }
 
             if !result.already_existed {
                 if let Err(error) = state
@@ -119,7 +126,14 @@ pub(crate) async fn delete_like(
     {
         Ok(result) => {
             let cache_key = like_count_cache_key(&content_type, &content_id);
-            store_local_like_count(&state, &cache_key, result.count);
+            if let Err(error) = cache_like_count(&state, &cache_key, result.count).await {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "failed to update redis cache for unlike"
+                );
+                store_local_like_count(&state, &cache_key, result.count);
+            }
 
             if result.was_liked {
                 if let Err(error) = state
