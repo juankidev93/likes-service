@@ -178,6 +178,7 @@ curl -N 'http://127.0.0.1:8080/v1/likes/stream?content_type=post&content_id=aaaa
 - Count reads use Redis as a cache, but fall back to Postgres when Redis is unavailable. This keeps the read path available at the cost of degraded performance.
 - Content validation results are cached in Redis with a bounded TTL. Both `200` and `404` outcomes are cacheable, which reduces repeated dependency calls for hot content IDs.
 - Count cache entries use a bounded TTL and are also refreshed opportunistically on writes. In practice this keeps the maximum staleness window bounded by `CACHE_TTL_LIKE_COUNTS_SECS`, while still healing naturally after a Redis restart or cold start.
+- Count cache entries are also pushed to each instance over Redis Pub/Sub after `like` / `unlike`, so hot `GET /count` requests can usually hit the per-process L1 cache instead of paying a Redis roundtrip on every read.
 - Count cache repopulation uses a simple single-flight strategy per key. When a hot key expires, only one request repopulates it from Postgres while concurrent requests wait for the refreshed value instead of stampeding the database.
 - Authenticated like-status responses are cached in Redis for `CACHE_TTL_USER_STATUS_SECS`, and `like` / `unlike` refresh that cache directly after writes.
 - `GET /v1/likes/top` uses persisted totals for `window=all` and hourly preaggregation for `24h`, `7d`, and `30d`. This is simpler and more scalable than aggregating directly from `likes` on every request, while staying easier to review than a more advanced pipeline.

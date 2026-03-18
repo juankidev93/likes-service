@@ -1,4 +1,4 @@
-use crate::app_state::AppState;
+use crate::app_state::{AppState, LikeCountCacheUpdate};
 use crate::config::ServiceConfig;
 use crate::health::ready_health;
 use crate::http::{
@@ -16,6 +16,7 @@ use crate::mock_content_api::{build_mock_content_store, get_content};
 use crate::mock_profile_api::{build_mock_profiles, validate_token};
 use crate::resilience::circuit_breaker::CircuitBreaker;
 use axum::{Router, middleware, routing::get};
+use futures_util::StreamExt;
 use redis::AsyncCommands;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
@@ -94,8 +95,7 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
     );
     let shutdown_signal = ShutdownSignal::new();
     let like_events = LikeEvents::new(redis_client.clone());
-
-    AppState {
+    let app_state = AppState {
         db_pool,
         read_db_pool,
         redis_client,
@@ -115,7 +115,11 @@ pub async fn build_app_state(config: &ServiceConfig) -> AppState {
         profile_api_client,
         shutdown_signal,
         like_events,
-    }
+    };
+
+    spawn_like_count_cache_subscriber(app_state.clone());
+
+    app_state
 }
 
 pub fn build_app(app_state: AppState) -> Router {
@@ -259,4 +263,82 @@ pub fn build_mock_content_app() -> Router {
         .route("/v1/{content_type}/{content_id}", get(get_content))
         .with_state(state)
         .layer(middleware::from_fn(request_logging_middleware))
+}
+
+fn spawn_like_count_cache_subscriber(state: AppState) {
+    tokio::spawn(async move {
+        let mut shutdown = state.shutdown_signal.subscribe();
+
+        loop {
+            if *shutdown.borrow() {
+                break;
+            }
+
+            let mut pubsub = match state.redis_client.get_async_pubsub().await {
+                Ok(pubsub) => pubsub,
+                Err(error) => {
+                    tracing::warn!(
+                        service = "likes_service",
+                        error = %error,
+                        "failed to open redis pubsub for like count cache updates"
+                    );
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
+
+            if let Err(error) = pubsub
+                .subscribe(crate::http::helpers::LIKE_COUNT_UPDATES_CHANNEL)
+                .await
+            {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "failed to subscribe to like count cache updates"
+                );
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+
+            let mut messages = pubsub.on_message();
+
+            loop {
+                tokio::select! {
+                    _ = shutdown.changed() => {
+                        if *shutdown.borrow() {
+                            return;
+                        }
+                    }
+                    maybe_message = messages.next() => {
+                        match maybe_message {
+                            Some(message) => {
+                                let payload: Result<String, _> = message.get_payload();
+
+                                match payload
+                                    .ok()
+                                    .and_then(|value| serde_json::from_str::<LikeCountCacheUpdate>(&value).ok()) {
+                                    Some(update) => {
+                                        crate::http::helpers::apply_like_count_update(&state, &update);
+                                    }
+                                    None => {
+                                        tracing::warn!(
+                                            service = "likes_service",
+                                            "failed to decode like count cache update"
+                                        );
+                                    }
+                                }
+                            }
+                            None => {
+                                tracing::warn!(
+                                    service = "likes_service",
+                                    "like count cache update subscription closed; retrying"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 }

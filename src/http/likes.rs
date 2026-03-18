@@ -18,7 +18,8 @@ use super::dto::{
 };
 use super::helpers::{
     cache_like_count, cache_like_status, get_cached_like_count, get_cached_like_status,
-    like_count_cache_key, parse_authenticated_user_id, store_local_like_count, success,
+    like_count_cache_key, parse_authenticated_user_id, publish_like_count_update,
+    store_local_like_count, success,
 };
 
 pub(crate) async fn create_like(
@@ -62,6 +63,16 @@ pub(crate) async fn create_like(
                     "failed to update redis cache for like"
                 );
                 store_local_like_count(&state, &cache_key, result.count);
+            }
+
+            if let Err(error) =
+                publish_like_count_update(&state, &content_type, &content_id, result.count).await
+            {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "failed to publish count cache update for like"
+                );
             }
 
             if !result.already_existed {
@@ -153,6 +164,16 @@ pub(crate) async fn delete_like(
                     "failed to update redis cache for unlike"
                 );
                 store_local_like_count(&state, &cache_key, result.count);
+            }
+
+            if let Err(error) =
+                publish_like_count_update(&state, &content_type, &content_id, result.count).await
+            {
+                tracing::warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "failed to publish count cache update for unlike"
+                );
             }
 
             if result.was_liked {

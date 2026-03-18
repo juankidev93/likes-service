@@ -9,6 +9,7 @@ use crate::integrations::profile_api_client::ProfileApiClient;
 use crate::integrations::sse_events::LikeEvents;
 use redis::Client as RedisClient;
 use redis::aio::MultiplexedConnection;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tokio::sync::{Mutex, Notify};
 
@@ -40,6 +41,13 @@ pub struct AppState {
 pub struct MockProfile {
     pub user_id: String,
     pub display_name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LikeCountCacheUpdate {
+    pub content_type: String,
+    pub content_id: String,
+    pub count: i64,
 }
 
 #[derive(Default)]

@@ -270,6 +270,7 @@ pub fn record_cache_operation(operation: &str, result: &str) {
         .inc();
 }
 
+
 pub fn record_external_call(service: &str, method: &str, status: &str, latency_seconds: f64) {
     EXTERNAL_CALLS_TOTAL
         .with_label_values(&[service, method, status])

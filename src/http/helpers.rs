@@ -1,4 +1,4 @@
-use crate::app_state::AppState;
+use crate::app_state::{AppState, LikeCountCacheUpdate};
 use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
 use crate::integrations::profile_api_client::AuthenticatedUser;
@@ -17,6 +17,7 @@ pub(super) const MAX_BATCH_ITEMS: usize = 100;
 const DEFAULT_TOP_LIKES_LIMIT: usize = 10;
 const MAX_TOP_LIKES_LIMIT: usize = 50;
 const LOCAL_LIKE_COUNT_CACHE_TTL_MS: u64 = 5000;
+pub(crate) const LIKE_COUNT_UPDATES_CHANNEL: &str = "likes:count_updates";
 
 pub(super) fn parse_authenticated_user_id(
     authenticated_user: &AuthenticatedUser,
@@ -163,9 +164,10 @@ pub(super) async fn get_cached_like_counts(
     for (index, count) in missing_indexes.into_iter().zip(redis_counts.into_iter()) {
         if let Some(count) = count {
             store_local_like_count(state, &keys[index], count);
+            counts[index] = Some(count);
+        } else {
+            counts[index] = None;
         }
-
-        counts[index] = count;
     }
 
     Ok(counts)
@@ -183,6 +185,38 @@ pub(super) async fn cache_like_count(
         .set_ex(key, count, state.cache_ttl_like_counts_seconds)
         .await?;
     Ok(())
+}
+
+pub(super) async fn publish_like_count_update(
+    state: &AppState,
+    content_type: &ContentType,
+    content_id: &ContentId,
+    count: i64,
+) -> Result<(), AppError> {
+    let payload = serde_json::to_string(&LikeCountCacheUpdate {
+        content_type: content_type.to_string(),
+        content_id: content_id.to_string(),
+        count,
+    })
+    .map_err(|error| {
+        AppError::dependency_unavailable(
+            "CACHE_SERIALIZATION_ERROR",
+            format!("failed to encode count cache update: {error}"),
+        )
+    })?;
+
+    let mut redis_connection = state.get_redis_connection().await?;
+    let _: i64 = redis::cmd("PUBLISH")
+        .arg(LIKE_COUNT_UPDATES_CHANNEL)
+        .arg(payload)
+        .query_async(&mut redis_connection)
+        .await?;
+    Ok(())
+}
+
+pub(crate) fn apply_like_count_update(state: &AppState, update: &LikeCountCacheUpdate) {
+    let key = format!("likes:count:{}:{}", update.content_type, update.content_id);
+    store_local_like_count(state, &key, update.count);
 }
 
 pub(super) async fn get_cached_json<T>(state: &AppState, key: &str) -> Result<Option<T>, AppError>
