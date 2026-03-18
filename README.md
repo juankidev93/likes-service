@@ -207,6 +207,7 @@ OpenAPI:
 gRPC:
 - The repository includes [proto/likes.proto](proto/likes.proto) and an optional tonic-based gRPC server for the same likes domain.
 - The gRPC server reuses the same domain logic and persistence layer as the HTTP API. It is disabled by default and only starts when `GRPC_PORT` is set.
+- Server reflection is enabled, so `grpcurl` can inspect services and methods without passing the local proto file.
 - Supported methods: `Like`, `Unlike`, `GetLikeCount`, `GetLikeStatus`, `GetUserLikes`, `BatchGetLikeCounts`, `BatchGetLikeStatuses`, and `GetTopLikes`.
 - Example local run:
 

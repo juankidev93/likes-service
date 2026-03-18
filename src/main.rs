@@ -17,7 +17,7 @@ mod use_cases;
 mod integration_tests;
 
 use config::ServiceConfig;
-use grpc::GrpcLikesService;
+use grpc::{FILE_DESCRIPTOR_SET, GrpcLikesService};
 use infra::bootstrap::{build_app, build_app_state, build_mock_content_app, build_mock_profile_app};
 use infra::logging::init_tracing;
 use infra::metrics::init_metrics;
@@ -170,11 +170,16 @@ async fn serve_grpc(
 ) -> Result<(), tonic::transport::Error> {
     let mut shutdown_receiver = shutdown_handle.subscribe();
     let grpc_service = GrpcLikesService::new(app_state);
+    let reflection_service = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
+        .build_v1()
+        .expect("failed to build gRPC reflection service");
 
     tracing::info!(service = "likes_service", grpc_address = %address, "starting gRPC server");
 
     GrpcServer::builder()
         .add_service(grpc_service.into_server())
+        .add_service(reflection_service)
         .serve_with_shutdown(address, async move {
             while !*shutdown_receiver.borrow() {
                 if shutdown_receiver.changed().await.is_err() {

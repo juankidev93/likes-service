@@ -1,8 +1,10 @@
 use crate::config::ServiceConfig;
 use crate::grpc::GrpcLikesService;
 use crate::grpc::pb::{
-    ContentType as GrpcContentType, GetLikeCountRequest, GetLikeStatusRequest, LikeRequest,
-    likes_service_client::LikesServiceClient,
+    BatchGetLikeCountsRequest, BatchGetLikeStatusesRequest, ContentRef,
+    ContentType as GrpcContentType, GetLikeCountRequest, GetLikeStatusRequest,
+    GetTopLikesRequest, GetUserLikesRequest, LikeRequest, TopLikesWindow as GrpcTopLikesWindow,
+    UnlikeRequest, likes_service_client::LikesServiceClient,
 };
 use crate::infra::bootstrap::{build_app, build_app_state};
 use crate::infra::logging::init_tracing;
@@ -210,6 +212,187 @@ async fn grpc_like_lifecycle_returns_expected_responses() {
         .expect_err("invalid token must fail");
 
     assert_eq!(invalid_token.code(), Code::Unauthenticated);
+
+    let _ = shutdown_tx.send(());
+    grpc_handle
+        .await
+        .expect("gRPC server task must finish cleanly");
+    mock_server.shutdown().await;
+    cleanup_database(&config.database_url).await;
+    cleanup_redis(&config.redis_url).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
+    init_test_runtime();
+
+    let mock_address = unused_socket_addr();
+    let grpc_address = unused_socket_addr();
+    let mock_server = spawn_grpc_dependency_mock_server(mock_address).await;
+
+    let config = base_test_config(mock_address);
+    cleanup_database(&config.database_url).await;
+    cleanup_redis(&config.redis_url).await;
+
+    let app_state = build_app_state(&config).await;
+    let grpc_service = GrpcLikesService::new(app_state);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    let grpc_handle = tokio::spawn(async move {
+        GrpcServer::builder()
+            .add_service(grpc_service.into_server())
+            .serve_with_shutdown(grpc_address, async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .expect("gRPC test server must run");
+    });
+
+    sleep(Duration::from_millis(100)).await;
+
+    let mut client = LikesServiceClient::connect(format!("http://{grpc_address}"))
+        .await
+        .expect("gRPC client must connect");
+
+    client
+        .like(LikeRequest {
+            session_token: "tok_user_1".to_string(),
+            content_type: GrpcContentType::Post as i32,
+            content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
+        })
+        .await
+        .expect("first post like must succeed");
+
+    sleep(Duration::from_millis(5)).await;
+
+    client
+        .like(LikeRequest {
+            session_token: "tok_user_1".to_string(),
+            content_type: GrpcContentType::BonusHunter as i32,
+            content_id: "c3d4e5f6-a7b8-9012-cdef-123456789012".to_string(),
+        })
+        .await
+        .expect("bonus hunter like must succeed");
+
+    client
+        .like(LikeRequest {
+            session_token: "tok_user_2".to_string(),
+            content_type: GrpcContentType::Post as i32,
+            content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
+        })
+        .await
+        .expect("second post like must succeed");
+
+    let counts = client
+        .batch_get_like_counts(BatchGetLikeCountsRequest {
+            items: vec![
+                ContentRef {
+                    content_type: GrpcContentType::Post as i32,
+                    content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
+                },
+                ContentRef {
+                    content_type: GrpcContentType::BonusHunter as i32,
+                    content_id: "c3d4e5f6-a7b8-9012-cdef-123456789012".to_string(),
+                },
+            ],
+        })
+        .await
+        .expect("batch counts must succeed")
+        .into_inner();
+
+    assert_eq!(counts.results.len(), 2);
+    assert_eq!(counts.results[0].count, 2);
+    assert_eq!(counts.results[1].count, 1);
+
+    let statuses = client
+        .batch_get_like_statuses(BatchGetLikeStatusesRequest {
+            session_token: "tok_user_1".to_string(),
+            items: vec![
+                ContentRef {
+                    content_type: GrpcContentType::Post as i32,
+                    content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
+                },
+                ContentRef {
+                    content_type: GrpcContentType::BonusHunter as i32,
+                    content_id: "c3d4e5f6-a7b8-9012-cdef-123456789012".to_string(),
+                },
+            ],
+        })
+        .await
+        .expect("batch statuses must succeed")
+        .into_inner();
+
+    assert_eq!(statuses.results.len(), 2);
+    assert!(statuses.results.iter().all(|item| item.liked));
+    assert!(statuses
+        .results
+        .iter()
+        .all(|item| item.liked_at.is_some()));
+
+    let first_page = client
+        .get_user_likes(GetUserLikesRequest {
+            session_token: "tok_user_1".to_string(),
+            content_type: None,
+            cursor: None,
+            limit: Some(1),
+        })
+        .await
+        .expect("first user likes page must succeed")
+        .into_inner();
+
+    assert_eq!(first_page.items.len(), 1);
+    assert_eq!(first_page.items[0].content_type, GrpcContentType::BonusHunter as i32);
+    assert!(first_page.has_more);
+    let next_cursor = first_page
+        .next_cursor
+        .expect("first page must expose cursor");
+
+    let second_page = client
+        .get_user_likes(GetUserLikesRequest {
+            session_token: "tok_user_1".to_string(),
+            content_type: None,
+            cursor: Some(next_cursor),
+            limit: Some(1),
+        })
+        .await
+        .expect("second user likes page must succeed")
+        .into_inner();
+
+    assert_eq!(second_page.items.len(), 1);
+    assert_eq!(second_page.items[0].content_type, GrpcContentType::Post as i32);
+    assert!(!second_page.has_more);
+    assert!(second_page.next_cursor.is_none());
+
+    let top = client
+        .get_top_likes(GetTopLikesRequest {
+            content_type: Some(GrpcContentType::Post as i32),
+            window: GrpcTopLikesWindow::TopLikesWindow24h as i32,
+            limit: Some(10),
+        })
+        .await
+        .expect("top likes must succeed")
+        .into_inner();
+
+    assert_eq!(top.window, GrpcTopLikesWindow::TopLikesWindow24h as i32);
+    assert_eq!(top.content_type, Some(GrpcContentType::Post as i32));
+    assert_eq!(top.items.len(), 1);
+    assert_eq!(top.items[0].content_id, "731b0395-4888-4822-b516-05b4b7bf2089");
+    assert_eq!(top.items[0].count, 2);
+
+    let unlike = client
+        .unlike(UnlikeRequest {
+            session_token: "tok_user_1".to_string(),
+            content_type: GrpcContentType::BonusHunter as i32,
+            content_id: "c3d4e5f6-a7b8-9012-cdef-123456789012".to_string(),
+        })
+        .await
+        .expect("unlike must succeed")
+        .into_inner();
+
+    assert!(!unlike.liked);
+    assert!(unlike.was_liked);
+    assert_eq!(unlike.count, 0);
 
     let _ = shutdown_tx.send(());
     grpc_handle
@@ -1750,23 +1933,30 @@ async fn spawn_grpc_dependency_mock_server(address: SocketAddr) -> AuxiliaryServ
                     .and_then(|value| value.to_str().ok())
                     .unwrap_or("");
 
-                if authorization == "Bearer tok_user_1" {
-                    (
+                match authorization {
+                    "Bearer tok_user_1" => (
                         AxumStatusCode::OK,
                         Json(json!({
                             "valid": true,
                             "user_id": "11111111-1111-1111-1111-111111111111",
                             "display_name": "Alice Test"
                         })),
-                    )
-                } else {
-                    (
+                    ),
+                    "Bearer tok_user_2" => (
+                        AxumStatusCode::OK,
+                        Json(json!({
+                            "valid": true,
+                            "user_id": "22222222-2222-2222-2222-222222222222",
+                            "display_name": "Bob Test"
+                        })),
+                    ),
+                    _ => (
                         AxumStatusCode::UNAUTHORIZED,
                         Json(json!({
                             "valid": false,
                             "error": "invalid_token"
                         })),
-                    )
+                    ),
                 }
             }),
         )

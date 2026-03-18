@@ -14,6 +14,8 @@ pub mod pb {
     tonic::include_proto!("social.likes.v1");
 }
 
+pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("likes_descriptor");
+
 use pb::likes_service_server::{LikesService, LikesServiceServer};
 use pb::*;
 
