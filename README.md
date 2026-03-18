@@ -213,7 +213,17 @@ gRPC:
 - Example local run:
 
 ```bash
-GRPC_PORT=50051 cargo run --release
+SERVICE_HOST=127.0.0.1 \
+HTTP_PORT=8080 \
+GRPC_PORT=50051 \
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
+READ_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
+REDIS_URL=redis://127.0.0.1:6379/ \
+PROFILE_API_URL=http://127.0.0.1:8084 \
+CONTENT_API_POST_URL=http://127.0.0.1:8081 \
+CONTENT_API_BONUS_HUNTER_URL=http://127.0.0.1:8082 \
+CONTENT_API_TOP_PICKS_URL=http://127.0.0.1:8083 \
+cargo run --release
 ```
 
 k6 load testing:
@@ -235,23 +245,24 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
 READ_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
 REDIS_URL=redis://127.0.0.1:6379/ \
 SERVICE_HOST=127.0.0.1 \
-HTTP_PORT=3000 \
+HTTP_PORT=8080 \
 LOG_LEVEL=warn \
 RUST_LOG=warn \
 cargo run --release
 ```
 
 ```bash
-BASE_URL=http://127.0.0.1:3000 BENCHMARK=read k6 run k6/load-test.js
-BASE_URL=http://127.0.0.1:3000 BENCHMARK=batch k6 run k6/load-test.js
-BASE_URL=http://127.0.0.1:3000 BENCHMARK=write k6 run k6/load-test.js
-BASE_URL=http://127.0.0.1:3000 BENCHMARK=mixed MIXED_RATE=6666 k6 run k6/load-test.js
+BASE_URL=http://127.0.0.1:8080 BENCHMARK=read k6 run k6/load-test.js
+BASE_URL=http://127.0.0.1:8080 BENCHMARK=batch k6 run k6/load-test.js
+BASE_URL=http://127.0.0.1:8080 BENCHMARK=write k6 run k6/load-test.js
+BASE_URL=http://127.0.0.1:8080 BENCHMARK=mixed MIXED_RATE=6666 k6 run k6/load-test.js
 ```
 
 Notes:
 - The script is `RATE_LIMIT_AWARE=true` by default, so it avoids turning the benchmark into a pure rate-limit exercise.
 - `mixed` is a traffic ratio in the challenge, not a fixed total throughput target.
 - `MIXED_RATE=6666` keeps the `15%` batch share close to the standalone `1,000 rps` batch target.
+- In repeated local runs, the `read` benchmark at `10k rps` stabilized around `~5.5-6.7ms p99` with the app running as a host `--release` binary and `LOG_LEVEL=warn`. That is very close to the most aggressive `<5ms` target, but still sensitive to local machine conditions.
 
 ## License
 
