@@ -6,17 +6,19 @@ use crate::integrations::profile_api_client::AuthenticatedUser;
 use crate::storage::likes_repository::PostgresLikesRepository;
 use crate::use_cases::LikesUseCases;
 use axum::{
+    Json,
     extract::{Extension, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use std::str::FromStr;
 
-use super::dto::{CreateLikeRequest, LikeCountResponse, LikeResponse, LikeStatusResponse, UnlikeResponse};
+use super::dto::{
+    CreateLikeRequest, LikeCountResponse, LikeResponse, LikeStatusResponse, UnlikeResponse,
+};
 use super::helpers::{
     cache_like_count, get_cached_like_count, like_count_cache_key, parse_authenticated_user_id,
-    success,
+    store_local_like_count, success,
 };
 
 pub(crate) async fn create_like(
@@ -52,6 +54,9 @@ pub(crate) async fn create_like(
         .await
     {
         Ok(result) => {
+            let cache_key = like_count_cache_key(&content_type, &content_id);
+            store_local_like_count(&state, &cache_key, result.count);
+
             if !result.already_existed {
                 if let Err(error) = state
                     .like_events
@@ -113,15 +118,13 @@ pub(crate) async fn delete_like(
         .await
     {
         Ok(result) => {
+            let cache_key = like_count_cache_key(&content_type, &content_id);
+            store_local_like_count(&state, &cache_key, result.count);
+
             if result.was_liked {
                 if let Err(error) = state
                     .like_events
-                    .publish_unlike(
-                        &user_id,
-                        &content_type,
-                        &content_id,
-                        result.count,
-                    )
+                    .publish_unlike(&user_id, &content_type, &content_id, result.count)
                     .await
                 {
                     tracing::warn!(service = "likes_service", error = %error, "failed to publish unlike event");

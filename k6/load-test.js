@@ -3,21 +3,25 @@ import { check, sleep } from 'k6';
 import exec from 'k6/execution';
 
 const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:3000';
+const BENCHMARK = (__ENV.BENCHMARK || 'read').toLowerCase();
 const RATE_LIMIT_AWARE = (__ENV.RATE_LIMIT_AWARE || 'true') === 'true';
-const TOKENS = (__ENV.TOKENS || 'tok_user_1,tok_user_2,tok_user_3,tok_user_4,tok_user_5')
+const READ_TARGET_RATE = Number(__ENV.READ_RATE || 10000);
+const BATCH_TARGET_RATE = Number(__ENV.BATCH_RATE || 1000);
+const WRITE_TARGET_RATE = Number(__ENV.WRITE_RATE || 500);
+const MIXED_TARGET_RATE = Number(__ENV.MIXED_RATE || 6666);
+const READ_LIMIT_PER_MINUTE = Number(__ENV.RATE_LIMIT_READ_PER_MINUTE || 1000);
+const WRITE_LIMIT_PER_MINUTE = Number(__ENV.RATE_LIMIT_WRITE_PER_MINUTE || 30);
+const READ_IP_SAFETY_FACTOR = Number(__ENV.READ_IP_SAFETY_FACTOR || 1.2);
+const WRITE_SAFETY_FACTOR = Number(__ENV.WRITE_SAFETY_FACTOR || 0.8);
+const SCENARIOS = buildScenarios();
+const READ_IP_POOL_SIZE = Math.max(
+  1,
+  Number(__ENV.READ_IP_POOL_SIZE || requiredReadIpPoolSize()),
+);
+const TOKENS = (__ENV.TOKENS || generateTokens(requiredTokenCount()))
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
-const WRITE_LIMIT_PER_MINUTE = Number(__ENV.RATE_LIMIT_WRITE_PER_MINUTE || 30);
-const WRITE_SAFETY_FACTOR = Number(__ENV.WRITE_SAFETY_FACTOR || 0.8);
-const DEFAULT_WRITE_RATE = Math.max(
-  1,
-  Math.floor((TOKENS.length * WRITE_LIMIT_PER_MINUTE * WRITE_SAFETY_FACTOR) / 60),
-);
-const DEFAULT_MIXED_RATE = Math.max(
-  1,
-  Math.floor(DEFAULT_WRITE_RATE / 0.05),
-);
 
 const POST_IDS = (__ENV.POST_IDS || [
   'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1',
@@ -59,52 +63,14 @@ const CONTENT_FIXTURES = [
 ];
 
 export const options = {
-  scenarios: {
-    read_path: {
-      executor: 'constant-arrival-rate',
-      exec: 'readCountScenario',
-      rate: Number(__ENV.READ_RATE || 200),
-      timeUnit: '1s',
-      duration: __ENV.READ_DURATION || '30s',
-      preAllocatedVUs: Number(__ENV.READ_VUS || 20),
-      maxVUs: Number(__ENV.READ_MAX_VUS || 100),
-    },
-    batch_path: {
-      executor: 'constant-arrival-rate',
-      exec: 'batchCountsScenario',
-      rate: Number(__ENV.BATCH_RATE || 20),
-      timeUnit: '1s',
-      duration: __ENV.BATCH_DURATION || '30s',
-      preAllocatedVUs: Number(__ENV.BATCH_VUS || 10),
-      maxVUs: Number(__ENV.BATCH_MAX_VUS || 50),
-      startTime: '2s',
-    },
-    write_path: {
-      executor: 'constant-arrival-rate',
-      exec: 'writeLikeScenario',
-      rate: Number(__ENV.WRITE_RATE || DEFAULT_WRITE_RATE),
-      timeUnit: '1s',
-      duration: __ENV.WRITE_DURATION || '30s',
-      preAllocatedVUs: Number(__ENV.WRITE_VUS || 10),
-      maxVUs: Number(__ENV.WRITE_MAX_VUS || 50),
-      startTime: '4s',
-    },
-    mixed_path: {
-      executor: 'constant-arrival-rate',
-      exec: 'mixedScenario',
-      rate: Number(__ENV.MIXED_RATE || DEFAULT_MIXED_RATE),
-      timeUnit: '1s',
-      duration: __ENV.MIXED_DURATION || '30s',
-      preAllocatedVUs: Number(__ENV.MIXED_VUS || 20),
-      maxVUs: Number(__ENV.MIXED_MAX_VUS || 100),
-      startTime: '6s',
-    },
-  },
+  scenarios: SCENARIOS,
   thresholds: buildThresholds(),
 };
 
 export function setup() {
-  for (const token of TOKENS) {
+  const warmupTokenCount = Math.max(1, Number(__ENV.WARMUP_TOKEN_COUNT || 5));
+
+  for (const token of TOKENS.slice(0, warmupTokenCount)) {
     for (const item of CONTENT_FIXTURES.slice(0, 3)) {
       http.post(`${BASE_URL}/v1/likes`, JSON.stringify(item), {
         headers: authHeaders(token),
@@ -225,10 +191,10 @@ function safeJson(response) {
 }
 
 function syntheticClientIp() {
-  const iteration = exec.scenario.iterationInTest;
-  const secondOctet = 113 + (iteration % 10);
-  const thirdOctet = Math.floor(iteration / 10) % 250;
-  const fourthOctet = (iteration % 250) + 1;
+  const iteration = exec.scenario.iterationInTest % READ_IP_POOL_SIZE;
+  const secondOctet = 113 + (Math.floor(iteration / 250) % 10);
+  const thirdOctet = Math.floor(iteration / 50) % 250;
+  const fourthOctet = (iteration % 50) + 1;
   return `203.${secondOctet}.${thirdOctet}.${fourthOctet}`;
 }
 
@@ -242,4 +208,105 @@ function buildThresholds() {
   thresholds.http_req_failed = RATE_LIMIT_AWARE ? ['rate<0.01'] : ['rate<0.95'];
 
   return thresholds;
+}
+
+function buildScenarios() {
+  switch (BENCHMARK) {
+    case 'read':
+      return {
+        read_path: buildScenario('readCountScenario', READ_TARGET_RATE, 'READ', 200, 1000),
+      };
+    case 'batch':
+      return {
+        batch_path: buildScenario('batchCountsScenario', BATCH_TARGET_RATE, 'BATCH', 100, 500),
+      };
+    case 'write':
+      return {
+        write_path: buildScenario('writeLikeScenario', WRITE_TARGET_RATE, 'WRITE', 100, 1000),
+      };
+    case 'mixed':
+      return {
+        mixed_path: buildScenario('mixedScenario', MIXED_TARGET_RATE, 'MIXED', 200, 1000),
+      };
+    case 'all':
+      return {
+        read_path: buildScenario('readCountScenario', READ_TARGET_RATE, 'READ', 200, 1000),
+        batch_path: {
+          ...buildScenario('batchCountsScenario', BATCH_TARGET_RATE, 'BATCH', 100, 500),
+          startTime: '2s',
+        },
+        write_path: {
+          ...buildScenario('writeLikeScenario', WRITE_TARGET_RATE, 'WRITE', 100, 1000),
+          startTime: '4s',
+        },
+        mixed_path: {
+          ...buildScenario('mixedScenario', MIXED_TARGET_RATE, 'MIXED', 200, 1000),
+          startTime: '6s',
+        },
+      };
+    default:
+      throw new Error(`unsupported BENCHMARK value: ${BENCHMARK}`);
+  }
+}
+
+function buildScenario(execName, defaultRate, prefix, defaultVUs, defaultMaxVUs) {
+  return {
+    executor: 'constant-arrival-rate',
+    exec: execName,
+    rate: defaultRate,
+    timeUnit: '1s',
+    duration: __ENV[`${prefix}_DURATION`] || '30s',
+    preAllocatedVUs: Number(__ENV[`${prefix}_VUS`] || defaultVUs),
+    maxVUs: Number(__ENV[`${prefix}_MAX_VUS`] || defaultMaxVUs),
+  };
+}
+
+function requiredReadIpPoolSize() {
+  if (!RATE_LIMIT_AWARE) {
+    return 1;
+  }
+
+  const readCapacityPerIp = Math.max(1, READ_LIMIT_PER_MINUTE / 60);
+  const publicReadRate =
+    Object.values(SCENARIOS).reduce((sum, scenario) => {
+      if (scenario.exec === 'readCountScenario') {
+        return sum + scenario.rate;
+      }
+
+      if (scenario.exec === 'batchCountsScenario') {
+        return sum + scenario.rate;
+      }
+
+      if (scenario.exec === 'mixedScenario') {
+        return sum + (scenario.rate * 0.95);
+      }
+
+      return sum;
+    }, 0);
+
+  return Math.ceil((publicReadRate / readCapacityPerIp) * READ_IP_SAFETY_FACTOR);
+}
+
+function requiredTokenCount() {
+  const writeRate =
+    Object.values(SCENARIOS).reduce((sum, scenario) => {
+      if (scenario.exec === 'writeLikeScenario') {
+        return sum + scenario.rate;
+      }
+
+      if (scenario.exec === 'mixedScenario') {
+        return sum + (scenario.rate * 0.05);
+      }
+
+      return sum;
+    }, 0);
+
+  const safeWritesPerUserPerSecond =
+    Math.max(1, (WRITE_LIMIT_PER_MINUTE * WRITE_SAFETY_FACTOR) / 60);
+
+  return Math.max(5, Math.ceil(writeRate / safeWritesPerUserPerSecond));
+}
+
+function generateTokens(count) {
+  return Array.from({ length: count }, (_, index) => `tok_user_${index + 1}`).join(',');
 }

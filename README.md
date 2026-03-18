@@ -80,50 +80,6 @@ REDIS_URL=redis://127.0.0.1:6379/ \
 cargo test -- --test-threads=1
 ```
 
-For optional load testing with `k6`:
-
-```bash
-k6 run k6/load-test.js
-```
-
-Useful overrides:
-
-```bash
-BASE_URL=http://127.0.0.1:3000 \
-READ_RATE=500 \
-BATCH_RATE=50 \
-WRITE_RATE=20 \
-MIXED_RATE=100 \
-k6 run k6/load-test.js
-```
-
-The script covers:
-- read count hot path
-- batch count hot path
-- write likes
-- a mixed 80/15/5 traffic profile
-
-By default the script is `RATE_LIMIT_AWARE=true`, which means:
-- public read scenarios rotate `X-Forwarded-For` to avoid collapsing everything onto one read-rate-limited IP
-- write defaults stay below the configured per-user write limiter for the bundled mock tokens
-
-If you want to intentionally observe rate limiting rather than avoid it:
-
-```bash
-RATE_LIMIT_AWARE=false \
-WRITE_RATE=20 \
-MIXED_RATE=100 \
-k6 run k6/load-test.js
-```
-
-If you want to push raw throughput harder, either provide more valid bearer tokens or temporarily raise the service rate limits in the target environment.
-
-The bundled thresholds are intentionally aggressive. On a local Docker setup, `read_count` may land slightly above the target p99 even when the service is otherwise healthy, so treat the k6 output as an environment-sensitive signal rather than a strict pass/fail benchmark.
-
-An OpenAPI specification for the current HTTP contract is available in [openapi.yaml](openapi.yaml).
-Interactive Swagger UI is served by the app at `/docs`, backed by `/openapi.yaml`.
-The spec uses a same-origin server entry, so `/docs` works correctly whether you access the app through `localhost`, `127.0.0.1`, or another host name.
-
 ## Main Endpoints
 
 Health and observability:
@@ -225,6 +181,49 @@ curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaa
 - Add retention and compaction strategy for old hourly leaderboard buckets.
 - Move health, topology, and trade-off notes into more explicit operational documentation if the service becomes long-lived.
 - Introduce stronger migration tooling beyond Docker init scripts if the service needs a more formal deployment workflow.
+
+## Extras
+
+OpenAPI:
+- The HTTP contract is documented in [openapi.yaml](openapi.yaml).
+- Swagger UI is served at `/docs` and uses `/openapi.yaml` from the same origin.
+
+k6 load testing:
+- The repository includes [k6/load-test.js](k6/load-test.js) to validate the challenge hot paths.
+- Supported modes:
+  - `BENCHMARK=read` for `GET /v1/likes/{type}/{id}/count`
+  - `BENCHMARK=batch` for `POST /v1/likes/batch/counts`
+  - `BENCHMARK=write` for `POST /v1/likes`
+  - `BENCHMARK=mixed` for an `80/15/5` read/batch/write mix
+- Recommended local setup:
+  - keep Postgres and Redis in Docker
+  - run the app as a local `--release` binary
+  - benchmark with `LOG_LEVEL=warn` and `RUST_LOG=warn`
+
+Example:
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
+READ_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
+REDIS_URL=redis://127.0.0.1:6379/ \
+SERVICE_HOST=127.0.0.1 \
+HTTP_PORT=3000 \
+LOG_LEVEL=warn \
+RUST_LOG=warn \
+cargo run --release
+```
+
+```bash
+BASE_URL=http://127.0.0.1:3000 BENCHMARK=read k6 run k6/load-test.js
+BASE_URL=http://127.0.0.1:3000 BENCHMARK=batch k6 run k6/load-test.js
+BASE_URL=http://127.0.0.1:3000 BENCHMARK=write k6 run k6/load-test.js
+BASE_URL=http://127.0.0.1:3000 BENCHMARK=mixed MIXED_RATE=6666 k6 run k6/load-test.js
+```
+
+Notes:
+- The script is `RATE_LIMIT_AWARE=true` by default, so it avoids turning the benchmark into a pure rate-limit exercise.
+- `mixed` is a traffic ratio in the challenge, not a fixed total throughput target.
+- `MIXED_RATE=6666` keeps the `15%` batch share close to the standalone `1,000 rps` batch target.
 
 ## License
 

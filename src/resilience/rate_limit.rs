@@ -1,6 +1,6 @@
 use crate::app_state::AppState;
 use crate::auth_middleware::authenticate_headers;
-use crate::error::{set_rate_limit_headers, AppError};
+use crate::error::{AppError, set_rate_limit_headers};
 use crate::infra::logging::LoggedUserId;
 use crate::infra::metrics::{
     record_rate_limit_allowed, record_rate_limit_fail_open, record_rate_limit_rejected,
@@ -10,13 +10,24 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use redis::AsyncCommands;
+use once_cell::sync::Lazy;
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
 const WRITE_SCOPE: &str = "write_user";
 const READ_SCOPE: &str = "read_ip";
+static RATE_LIMIT_INCREMENT_SCRIPT: Lazy<redis::Script> = Lazy::new(|| {
+    redis::Script::new(
+        r#"
+        local current = redis.call('INCR', KEYS[1])
+        if current == 1 then
+            redis.call('EXPIRE', KEYS[1], ARGV[1])
+        end
+        return current
+        "#,
+    )
+});
 
 pub async fn require_write_auth_and_rate_limit(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -33,23 +44,24 @@ pub async fn require_write_auth_and_rate_limit(
     let (key, reset_epoch_seconds, retry_after_seconds) =
         rate_limit_window_key("write", &authenticated_user.user_id, now_seconds);
 
-    let rate_limit_state = match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
-        Ok(state) => state,
-        Err(error) => {
-            record_rate_limit_fail_open(WRITE_SCOPE);
-            warn!(
-                service = "likes_service",
-                error = %error,
-                "redis unavailable for write rate limiting, allowing request"
-            );
-            request.extensions_mut().insert(authenticated_user.clone());
-            let mut response = next.run(request).await;
-            response
-                .extensions_mut()
-                .insert(LoggedUserId(authenticated_user.user_id));
-            return response;
-        }
-    };
+    let rate_limit_state =
+        match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
+            Ok(state) => state,
+            Err(error) => {
+                record_rate_limit_fail_open(WRITE_SCOPE);
+                warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "redis unavailable for write rate limiting, allowing request"
+                );
+                request.extensions_mut().insert(authenticated_user.clone());
+                let mut response = next.run(request).await;
+                response
+                    .extensions_mut()
+                    .insert(LoggedUserId(authenticated_user.user_id));
+                return response;
+            }
+        };
 
     let remaining = limit.saturating_sub(rate_limit_state.current);
 
@@ -71,13 +83,7 @@ pub async fn require_write_auth_and_rate_limit(
     response
         .extensions_mut()
         .insert(LoggedUserId(authenticated_user.user_id));
-    set_rate_limit_headers(
-        &mut response,
-        limit,
-        remaining,
-        reset_epoch_seconds,
-        None,
-    );
+    set_rate_limit_headers(&mut response, limit, remaining, reset_epoch_seconds, None);
     response
 }
 
@@ -92,18 +98,19 @@ pub async fn require_read_rate_limit(
     let (key, reset_epoch_seconds, retry_after_seconds) =
         rate_limit_window_key("read", &client_ip, now_seconds);
 
-    let rate_limit_state = match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
-        Ok(state) => state,
-        Err(error) => {
-            record_rate_limit_fail_open(READ_SCOPE);
-            warn!(
-                service = "likes_service",
-                error = %error,
-                "redis unavailable for read rate limiting, allowing request"
-            );
-            return next.run(request).await;
-        }
-    };
+    let rate_limit_state =
+        match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
+            Ok(state) => state,
+            Err(error) => {
+                record_rate_limit_fail_open(READ_SCOPE);
+                warn!(
+                    service = "likes_service",
+                    error = %error,
+                    "redis unavailable for read rate limiting, allowing request"
+                );
+                return next.run(request).await;
+            }
+        };
 
     let remaining = limit.saturating_sub(rate_limit_state.current);
 
@@ -121,13 +128,7 @@ pub async fn require_read_rate_limit(
 
     record_rate_limit_allowed(READ_SCOPE);
     let mut response = next.run(request).await;
-    set_rate_limit_headers(
-        &mut response,
-        limit,
-        remaining,
-        reset_epoch_seconds,
-        None,
-    );
+    set_rate_limit_headers(&mut response, limit, remaining, reset_epoch_seconds, None);
     response
 }
 
@@ -136,12 +137,12 @@ async fn increment_and_read_rate_limit(
     key: &str,
     ttl_seconds: u64,
 ) -> Result<RateLimitState, redis::RedisError> {
-    let mut connection = state.redis_client.get_multiplexed_async_connection().await?;
-    let current: u32 = connection.incr(key, 1).await?;
-
-    if current == 1 {
-        let _: bool = connection.expire(key, ttl_seconds as i64).await?;
-    }
+    let mut connection = state.get_redis_connection().await?;
+    let current: u32 = RATE_LIMIT_INCREMENT_SCRIPT
+        .key(key)
+        .arg(ttl_seconds as i64)
+        .invoke_async(&mut connection)
+        .await?;
 
     Ok(RateLimitState { current })
 }

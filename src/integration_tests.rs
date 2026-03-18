@@ -1346,6 +1346,7 @@ impl TestServer {
         if config.redis_url != local_redis_url {
             app_state.redis_client = redis::Client::open(config.redis_url.clone())
                 .expect("test redis override must be a valid url");
+            app_state.redis_connection = None;
         }
         let app = build_app(app_state);
 

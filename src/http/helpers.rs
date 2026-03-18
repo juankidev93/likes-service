@@ -3,10 +3,11 @@ use crate::domain::{ContentId, ContentType, UserId};
 use crate::error::AppError;
 use crate::integrations::profile_api_client::AuthenticatedUser;
 use crate::storage::likes_repository::{LikesCursor, TopLikesWindow, UserLikeRow};
-use axum::{http::StatusCode, Json};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use axum::{Json, http::StatusCode};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use redis::AsyncCommands;
 use std::str::FromStr;
+use std::time::Duration;
 
 use super::dto::BatchLikeItemRequest;
 
@@ -14,6 +15,7 @@ const DEFAULT_USER_LIKES_LIMIT: usize = 20;
 pub(super) const MAX_BATCH_ITEMS: usize = 100;
 const DEFAULT_TOP_LIKES_LIMIT: usize = 10;
 const MAX_TOP_LIKES_LIMIT: usize = 50;
+const LOCAL_LIKE_COUNT_CACHE_TTL_MS: u64 = 250;
 
 pub(super) fn parse_authenticated_user_id(
     authenticated_user: &AuthenticatedUser,
@@ -77,7 +79,10 @@ pub(super) fn decode_cursor(value: &str) -> Result<LikesCursor, AppError> {
         .ok_or_else(|| AppError::invalid_request("INVALID_CURSOR", "invalid cursor"))?;
 
     if liked_at.is_empty() || content_id.is_empty() {
-        return Err(AppError::invalid_request("INVALID_CURSOR", "invalid cursor"));
+        return Err(AppError::invalid_request(
+            "INVALID_CURSOR",
+            "invalid cursor",
+        ));
     }
 
     Ok(LikesCursor {
@@ -86,9 +91,21 @@ pub(super) fn decode_cursor(value: &str) -> Result<LikesCursor, AppError> {
     })
 }
 
-pub(super) async fn get_cached_like_count(state: &AppState, key: &str) -> Result<Option<i64>, AppError> {
-    let mut redis_connection = state.redis_client.get_multiplexed_async_connection().await?;
+pub(super) async fn get_cached_like_count(
+    state: &AppState,
+    key: &str,
+) -> Result<Option<i64>, AppError> {
+    if let Some(count) = state.local_like_count_cache.get(key) {
+        return Ok(Some(count));
+    }
+
+    let mut redis_connection = state.get_redis_connection().await?;
     let count = redis_connection.get(key).await?;
+
+    if let Some(count) = count {
+        store_local_like_count(state, key, count);
+    }
+
     Ok(count)
 }
 
@@ -100,11 +117,36 @@ pub(super) async fn get_cached_like_counts(
         return Ok(Vec::new());
     }
 
-    let mut redis_connection = state.redis_client.get_multiplexed_async_connection().await?;
-    let counts = redis::cmd("MGET")
-        .arg(keys)
+    let mut counts = vec![None; keys.len()];
+    let mut missing_indexes = Vec::new();
+    let mut missing_keys = Vec::new();
+
+    for (index, key) in keys.iter().enumerate() {
+        if let Some(count) = state.local_like_count_cache.get(key) {
+            counts[index] = Some(count);
+        } else {
+            missing_indexes.push(index);
+            missing_keys.push(key.clone());
+        }
+    }
+
+    if missing_keys.is_empty() {
+        return Ok(counts);
+    }
+
+    let mut redis_connection = state.get_redis_connection().await?;
+    let redis_counts: Vec<Option<i64>> = redis::cmd("MGET")
+        .arg(&missing_keys)
         .query_async(&mut redis_connection)
         .await?;
+
+    for (index, count) in missing_indexes.into_iter().zip(redis_counts.into_iter()) {
+        if let Some(count) = count {
+            store_local_like_count(state, &keys[index], count);
+        }
+
+        counts[index] = count;
+    }
 
     Ok(counts)
 }
@@ -114,11 +156,21 @@ pub(super) async fn cache_like_count(
     key: &str,
     count: i64,
 ) -> Result<(), AppError> {
-    let mut redis_connection = state.redis_client.get_multiplexed_async_connection().await?;
+    store_local_like_count(state, key, count);
+
+    let mut redis_connection = state.get_redis_connection().await?;
     let _: () = redis_connection
         .set_ex(key, count, state.cache_ttl_like_counts_seconds)
         .await?;
     Ok(())
+}
+
+pub(super) fn store_local_like_count(state: &AppState, key: &str, count: i64) {
+    state.local_like_count_cache.set(
+        key.to_string(),
+        count,
+        Duration::from_millis(LOCAL_LIKE_COUNT_CACHE_TTL_MS),
+    );
 }
 
 pub(super) fn parse_batch_items(

@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use crate::infra::shutdown::ShutdownSignal;
 use crate::integrations::content_registry::ContentTypeRegistry;
@@ -6,6 +8,7 @@ use crate::integrations::content_validation::ContentValidationClient;
 use crate::integrations::profile_api_client::ProfileApiClient;
 use crate::integrations::sse_events::LikeEvents;
 use redis::Client as RedisClient;
+use redis::aio::MultiplexedConnection;
 use sqlx::PgPool;
 
 #[allow(dead_code)]
@@ -14,10 +17,12 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub read_db_pool: PgPool,
     pub redis_client: RedisClient,
+    pub redis_connection: Option<MultiplexedConnection>,
     pub cache_ttl_like_counts_seconds: u64,
     pub write_rate_limit_per_minute: u32,
     pub read_rate_limit_per_minute: u32,
     pub sse_heartbeat_interval_seconds: u64,
+    pub local_like_count_cache: Arc<LocalLikeCountCache>,
     pub mock_profiles: HashMap<String, MockProfile>,
     pub mock_content_store: HashMap<String, HashSet<String>>,
     pub content_type_registry: ContentTypeRegistry,
@@ -31,4 +36,55 @@ pub struct AppState {
 pub struct MockProfile {
     pub user_id: String,
     pub display_name: String,
+}
+
+#[derive(Default)]
+pub struct LocalLikeCountCache {
+    entries: RwLock<HashMap<String, LocalLikeCountCacheEntry>>,
+}
+
+#[derive(Clone, Copy)]
+struct LocalLikeCountCacheEntry {
+    count: i64,
+    expires_at: Instant,
+}
+
+impl AppState {
+    pub async fn get_redis_connection(&self) -> Result<MultiplexedConnection, redis::RedisError> {
+        if let Some(connection) = self.redis_connection.clone() {
+            return Ok(connection);
+        }
+
+        self.redis_client.get_multiplexed_async_connection().await
+    }
+}
+
+impl LocalLikeCountCache {
+    pub fn get(&self, key: &str) -> Option<i64> {
+        let now = Instant::now();
+        let entry = self.entries.read().ok()?.get(key).copied()?;
+
+        if entry.expires_at > now {
+            return Some(entry.count);
+        }
+
+        if let Ok(mut entries) = self.entries.write() {
+            if entries
+                .get(key)
+                .is_some_and(|entry| entry.expires_at <= now)
+            {
+                entries.remove(key);
+            }
+        }
+
+        None
+    }
+
+    pub fn set(&self, key: String, count: i64, ttl: Duration) {
+        let expires_at = Instant::now() + ttl;
+
+        if let Ok(mut entries) = self.entries.write() {
+            entries.insert(key, LocalLikeCountCacheEntry { count, expires_at });
+        }
+    }
 }

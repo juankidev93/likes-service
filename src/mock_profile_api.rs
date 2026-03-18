@@ -18,7 +18,10 @@ pub async fn validate_token(
 
     match state.mock_profiles.get(token) {
         Some(profile) => success(Json(ValidateTokenResponse::from(profile))).into_response(),
-        None => unauthorized("invalid bearer token").into_response(),
+        None => match generated_profile(token) {
+            Some(profile) => success(Json(ValidateTokenResponse::from(&profile))).into_response(),
+            None => unauthorized("invalid bearer token").into_response(),
+        },
     }
 }
 
@@ -72,4 +75,18 @@ fn unauthorized(message: &'static str) -> (StatusCode, Json<ErrorResponse>) {
             error: message,
         }),
     )
+}
+
+fn generated_profile(token: &str) -> Option<MockProfile> {
+    let suffix = token.strip_prefix("tok_user_")?;
+    let numeric_id = suffix.parse::<u64>().ok()?;
+
+    Some(MockProfile {
+        user_id: generated_uuid(numeric_id),
+        display_name: format!("Benchmark User {numeric_id}"),
+    })
+}
+
+fn generated_uuid(numeric_id: u64) -> String {
+    format!("00000000-0000-0000-0000-{numeric_id:012x}")
 }
