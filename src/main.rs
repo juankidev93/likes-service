@@ -20,6 +20,7 @@ use infra::bootstrap::{build_app, build_app_state};
 use infra::logging::init_tracing;
 use infra::metrics::init_metrics;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
@@ -41,13 +42,50 @@ async fn main() {
 
     tracing::info!(service = "likes_service", address = %config.bind_address(), "starting HTTP server");
 
-    axum::serve(
+    let mut shutdown_receiver = shutdown_handle.subscribe();
+    let server = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-        .with_graceful_shutdown(shutdown_signal(shutdown_handle))
-        .await
-        .expect("HTTP server failed");
+    .with_graceful_shutdown(async move {
+        while !*shutdown_receiver.borrow() {
+            if shutdown_receiver.changed().await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut server_task = tokio::spawn(async move { server.await });
+    let mut signal_task = tokio::spawn(shutdown_signal(shutdown_handle.clone()));
+
+    tokio::select! {
+        result = &mut server_task => {
+            signal_task.abort();
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => panic!("HTTP server failed: {error}"),
+                Err(error) => panic!("HTTP server task failed: {error}"),
+            }
+        }
+        result = &mut signal_task => {
+            if let Err(error) = result {
+                panic!("shutdown signal task failed: {error}");
+            }
+
+            match tokio::time::timeout(Duration::from_secs(config.shutdown_timeout_secs), &mut server_task).await {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(error))) => panic!("HTTP server failed: {error}"),
+                Ok(Err(error)) => panic!("HTTP server task failed: {error}"),
+                Err(_) => {
+                    tracing::warn!(
+                        service = "likes_service",
+                        shutdown_timeout_secs = config.shutdown_timeout_secs,
+                        "graceful shutdown timed out; aborting remaining tasks"
+                    );
+                }
+            }
+        }
+    }
 
     tracing::info!(service = "likes_service", "HTTP server stopped");
 }

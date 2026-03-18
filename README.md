@@ -54,21 +54,26 @@ Primary variables used by this service:
 - `DB_MAX_CONNECTIONS`
 - `DB_MIN_CONNECTIONS`
 - `DB_ACQUIRE_TIMEOUT_SECS`
+- `REDIS_POOL_SIZE`
 - `RATE_LIMIT_WRITE_PER_MINUTE`
 - `RATE_LIMIT_READ_PER_MINUTE`
 - `CACHE_TTL_LIKE_COUNTS_SECS`
 - `CACHE_TTL_CONTENT_VALIDATION_SECS`
+- `CACHE_TTL_USER_STATUS_SECS`
 - `CIRCUIT_BREAKER_FAILURE_THRESHOLD`
 - `CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECS`
 - `CIRCUIT_BREAKER_SUCCESS_THRESHOLD`
 - `CIRCUIT_BREAKER_FAILURE_WINDOW_SECONDS`
+- `SHUTDOWN_TIMEOUT_SECS`
 - `SSE_HEARTBEAT_INTERVAL_SECS`
+- `LEADERBOARD_REFRESH_INTERVAL_SECS`
 - `PROFILE_API_URL`
 - `CONTENT_API_POST_URL`
 - `CONTENT_API_BONUS_HUNTER_URL`
 - `CONTENT_API_TOP_PICKS_URL`
 
 They are already configured for local development in `docker-compose.yml`, and `.env.example` mirrors the same setup for host-based runs.
+The service fails fast on startup if required connection settings or external dependency URLs are missing.
 
 ## Tests
 
