@@ -51,7 +51,7 @@ pub(super) fn top_likes_cache_key(
     format!("likes:top:{}:{}:{}", window.as_str(), content_type, limit)
 }
 
-pub(super) fn parse_limit(limit: Option<usize>) -> Result<usize, AppError> {
+pub(crate) fn parse_limit(limit: Option<usize>) -> Result<usize, AppError> {
     let limit = limit.unwrap_or(DEFAULT_USER_LIKES_LIMIT);
 
     if limit == 0 || limit > MAX_BATCH_ITEMS {
@@ -64,7 +64,7 @@ pub(super) fn parse_limit(limit: Option<usize>) -> Result<usize, AppError> {
     Ok(limit)
 }
 
-pub(super) fn parse_top_likes_limit(limit: Option<usize>) -> Result<usize, AppError> {
+pub(crate) fn parse_top_likes_limit(limit: Option<usize>) -> Result<usize, AppError> {
     let limit = limit.unwrap_or(DEFAULT_TOP_LIKES_LIMIT);
 
     if limit == 0 || limit > MAX_TOP_LIKES_LIMIT {
@@ -77,16 +77,16 @@ pub(super) fn parse_top_likes_limit(limit: Option<usize>) -> Result<usize, AppEr
     Ok(limit)
 }
 
-pub(super) fn parse_top_likes_window(window: Option<&str>) -> Result<TopLikesWindow, AppError> {
+pub(crate) fn parse_top_likes_window(window: Option<&str>) -> Result<TopLikesWindow, AppError> {
     TopLikesWindow::from_str(window.unwrap_or("24h"))
 }
 
-pub(super) fn encode_cursor(row: &UserLikeRow) -> String {
+pub(crate) fn encode_cursor(row: &UserLikeRow) -> String {
     let raw = format!("{}|{}", row.liked_at, row.content_id);
     STANDARD.encode(raw)
 }
 
-pub(super) fn decode_cursor(value: &str) -> Result<LikesCursor, AppError> {
+pub(crate) fn decode_cursor(value: &str) -> Result<LikesCursor, AppError> {
     let decoded = STANDARD
         .decode(value)
         .map_err(|_| AppError::invalid_request("INVALID_CURSOR", "invalid cursor"))?;

@@ -3,6 +3,7 @@ mod auth_middleware;
 mod config;
 mod domain;
 mod error;
+mod grpc;
 mod health;
 mod http;
 mod infra;
@@ -16,11 +17,13 @@ mod use_cases;
 mod integration_tests;
 
 use config::ServiceConfig;
+use grpc::GrpcLikesService;
 use infra::bootstrap::{build_app, build_app_state, build_mock_content_app, build_mock_profile_app};
 use infra::logging::init_tracing;
 use infra::metrics::init_metrics;
 use std::net::SocketAddr;
 use std::time::Duration;
+use tonic::transport::Server as GrpcServer;
 
 #[tokio::main]
 async fn main() {
@@ -40,8 +43,10 @@ async fn main() {
     });
 
     let app_state = build_app_state(&config).await;
+    let grpc_state = app_state.clone();
     let shutdown_handle = app_state.shutdown_signal.clone();
     let app = build_app(app_state);
+    let grpc_port = std::env::var("GRPC_PORT").ok().and_then(|value| value.parse::<u16>().ok());
 
     let listener = tokio::net::TcpListener::bind(config.bind_address())
         .await
@@ -64,10 +69,26 @@ async fn main() {
 
     let mut server_task = tokio::spawn(async move { server.await });
     let mut signal_task = tokio::spawn(shutdown_signal(shutdown_handle.clone()));
+    let mut grpc_task = grpc_port.map(|port| {
+        let grpc_address = format!("{}:{port}", config.host)
+            .parse::<SocketAddr>()
+            .unwrap_or_else(|error| {
+                panic!("failed to parse gRPC bind address from SERVICE_HOST and GRPC_PORT: {error}")
+            });
+
+        tokio::spawn(serve_grpc(
+            grpc_state,
+            shutdown_handle.clone(),
+            grpc_address,
+        ))
+    });
 
     tokio::select! {
         result = &mut server_task => {
             signal_task.abort();
+            if let Some(grpc_task) = &grpc_task {
+                grpc_task.abort();
+            }
             match result {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => panic!("HTTP server failed: {error}"),
@@ -89,6 +110,21 @@ async fn main() {
                         shutdown_timeout_secs = config.shutdown_timeout_secs,
                         "graceful shutdown timed out; aborting remaining tasks"
                     );
+                }
+            }
+
+            if let Some(grpc_task) = &mut grpc_task {
+                match tokio::time::timeout(Duration::from_secs(config.shutdown_timeout_secs), grpc_task).await {
+                    Ok(Ok(Ok(()))) => {}
+                    Ok(Ok(Err(error))) => panic!("gRPC server failed: {error}"),
+                    Ok(Err(error)) => panic!("gRPC server task failed: {error}"),
+                    Err(_) => {
+                        tracing::warn!(
+                            service = "likes_service",
+                            shutdown_timeout_secs = config.shutdown_timeout_secs,
+                            "gRPC shutdown timed out; aborting remaining tasks"
+                        );
+                    }
                 }
             }
         }
@@ -125,6 +161,28 @@ async fn run_mock_service(run_mode: &str) {
         .with_graceful_shutdown(shutdown_signal(shutdown_handle))
         .await
         .expect("HTTP server failed");
+}
+
+async fn serve_grpc(
+    app_state: crate::app_state::AppState,
+    shutdown_handle: crate::infra::shutdown::ShutdownSignal,
+    address: SocketAddr,
+) -> Result<(), tonic::transport::Error> {
+    let mut shutdown_receiver = shutdown_handle.subscribe();
+    let grpc_service = GrpcLikesService::new(app_state);
+
+    tracing::info!(service = "likes_service", grpc_address = %address, "starting gRPC server");
+
+    GrpcServer::builder()
+        .add_service(grpc_service.into_server())
+        .serve_with_shutdown(address, async move {
+            while !*shutdown_receiver.borrow() {
+                if shutdown_receiver.changed().await.is_err() {
+                    break;
+                }
+            }
+        })
+        .await
 }
 
 async fn shutdown_signal(shutdown_handle: crate::infra::shutdown::ShutdownSignal) {

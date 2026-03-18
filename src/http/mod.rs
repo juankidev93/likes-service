@@ -1,7 +1,7 @@
 mod batch;
 mod docs;
 mod dto;
-mod helpers;
+pub(crate) mod helpers;
 mod likes;
 mod routes;
 mod stream;

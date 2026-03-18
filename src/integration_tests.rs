@@ -1,8 +1,18 @@
 use crate::config::ServiceConfig;
+use crate::grpc::GrpcLikesService;
+use crate::grpc::pb::{
+    ContentType as GrpcContentType, GetLikeCountRequest, GetLikeStatusRequest, LikeRequest,
+    likes_service_client::LikesServiceClient,
+};
 use crate::infra::bootstrap::{build_app, build_app_state};
 use crate::infra::logging::init_tracing;
 use crate::infra::metrics::init_metrics;
-use axum::{extract::Path, routing::get, Json, Router};
+use axum::{
+    extract::Path,
+    http::{HeaderMap, StatusCode as AxumStatusCode},
+    routing::get,
+    Json, Router,
+};
 use redis::AsyncCommands;
 use reqwest::StatusCode;
 use serde_json::{json, Value};
@@ -14,6 +24,8 @@ use std::sync::Once;
 use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{sleep, Duration};
+use tonic::Code;
+use tonic::transport::Server as GrpcServer;
 
 static TEST_INIT: Once = Once::new();
 
@@ -112,6 +124,100 @@ async fn content_validation_results_are_cached() {
     );
 
     server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn grpc_like_lifecycle_returns_expected_responses() {
+    init_test_runtime();
+
+    let mock_address = unused_socket_addr();
+    let grpc_address = unused_socket_addr();
+    let mock_server = spawn_grpc_dependency_mock_server(mock_address).await;
+
+    let config = base_test_config(mock_address);
+    cleanup_database(&config.database_url).await;
+    cleanup_redis(&config.redis_url).await;
+
+    let app_state = build_app_state(&config).await;
+    let grpc_service = GrpcLikesService::new(app_state);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    let grpc_handle = tokio::spawn(async move {
+        GrpcServer::builder()
+            .add_service(grpc_service.into_server())
+            .serve_with_shutdown(grpc_address, async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .expect("gRPC test server must run");
+    });
+
+    sleep(Duration::from_millis(100)).await;
+
+    let mut client = LikesServiceClient::connect(format!("http://{grpc_address}"))
+        .await
+        .expect("gRPC client must connect");
+
+    let count = client
+        .get_like_count(GetLikeCountRequest {
+            content_type: GrpcContentType::Post as i32,
+            content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
+        })
+        .await
+        .expect("get_like_count must succeed")
+        .into_inner();
+
+    assert_eq!(count.content_type, GrpcContentType::Post as i32);
+    assert_eq!(count.content_id, "731b0395-4888-4822-b516-05b4b7bf2089");
+    assert_eq!(count.count, 0);
+
+    let like = client
+        .like(LikeRequest {
+            session_token: "tok_user_1".to_string(),
+            content_type: GrpcContentType::Post as i32,
+            content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
+        })
+        .await
+        .expect("like must succeed")
+        .into_inner();
+
+    assert!(like.liked);
+    assert!(!like.already_existed);
+    assert_eq!(like.count, 1);
+    assert!(like.liked_at.is_some());
+
+    let status = client
+        .get_like_status(GetLikeStatusRequest {
+            session_token: "tok_user_1".to_string(),
+            content_type: GrpcContentType::Post as i32,
+            content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
+        })
+        .await
+        .expect("get_like_status must succeed")
+        .into_inner();
+
+    assert!(status.liked);
+    assert!(status.liked_at.is_some());
+
+    let invalid_token = client
+        .like(LikeRequest {
+            session_token: "bad-token".to_string(),
+            content_type: GrpcContentType::Post as i32,
+            content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
+        })
+        .await
+        .expect_err("invalid token must fail");
+
+    assert_eq!(invalid_token.code(), Code::Unauthenticated);
+
+    let _ = shutdown_tx.send(());
+    grpc_handle
+        .await
+        .expect("gRPC server task must finish cleanly");
+    mock_server.shutdown().await;
+    cleanup_database(&config.database_url).await;
+    cleanup_redis(&config.redis_url).await;
 }
 
 #[tokio::test]
@@ -1630,6 +1736,50 @@ async fn spawn_content_mock_server(address: SocketAddr) -> AuxiliaryServer {
             }))
         }),
     );
+
+    spawn_auxiliary_server(address, app).await
+}
+
+async fn spawn_grpc_dependency_mock_server(address: SocketAddr) -> AuxiliaryServer {
+    let app = Router::new()
+        .route(
+            "/v1/auth/validate",
+            get(|headers: HeaderMap| async move {
+                let authorization = headers
+                    .get("authorization")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("");
+
+                if authorization == "Bearer tok_user_1" {
+                    (
+                        AxumStatusCode::OK,
+                        Json(json!({
+                            "valid": true,
+                            "user_id": "11111111-1111-1111-1111-111111111111",
+                            "display_name": "Alice Test"
+                        })),
+                    )
+                } else {
+                    (
+                        AxumStatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "valid": false,
+                            "error": "invalid_token"
+                        })),
+                    )
+                }
+            }),
+        )
+        .route(
+            "/v1/{content_type}/{content_id}",
+            get(|Path((content_type, content_id)): Path<(String, String)>| async move {
+                Json(json!({
+                    "id": content_id,
+                    "content_type": content_type,
+                    "title": "Mock content"
+                }))
+            }),
+        );
 
     spawn_auxiliary_server(address, app).await
 }
