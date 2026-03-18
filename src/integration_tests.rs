@@ -3,6 +3,7 @@ use crate::infra::bootstrap::{build_app, build_app_state};
 use crate::infra::logging::init_tracing;
 use crate::infra::metrics::init_metrics;
 use axum::{extract::Path, routing::get, Json, Router};
+use redis::AsyncCommands;
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -109,6 +110,131 @@ async fn content_validation_results_are_cached() {
             &[("operation", "validate_content"), ("result", "hit")],
         ) >= hits_before + 1.0
     );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn count_cache_is_refreshed_after_like_and_unlike() {
+    let server = TestServer::spawn(|_| {}).await;
+    let content_type = "post";
+    let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
+    let cache_key = format!("likes:count:{content_type}:{content_id}");
+
+    create_like(&server, "tok_user_1", content_type, content_id).await;
+    let cached_after_like = redis_string(&server.redis_url, &cache_key).await;
+    assert_eq!(cached_after_like.as_deref(), Some("1"));
+
+    let response = server
+        .client
+        .delete(format!(
+            "{}/v1/likes/{content_type}/{content_id}",
+            server.base_url
+        ))
+        .bearer_auth("tok_user_1")
+        .send()
+        .await
+        .expect("delete like request must succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let cached_after_unlike = redis_string(&server.redis_url, &cache_key).await;
+    assert_eq!(cached_after_unlike.as_deref(), Some("0"));
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn like_status_cache_is_refreshed_after_like_and_unlike() {
+    let server = TestServer::spawn(|config| {
+        config.cache_ttl_user_status_seconds = 120;
+    })
+    .await;
+    let content_type = "post";
+    let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
+    let user_id = "11111111-1111-1111-1111-111111111111";
+    let cache_key = format!("likes:status:{user_id}:{content_type}:{content_id}");
+
+    let initial_response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/{content_type}/{content_id}/status",
+            server.base_url
+        ))
+        .bearer_auth("tok_user_1")
+        .send()
+        .await
+        .expect("status request must succeed");
+    assert_eq!(initial_response.status(), StatusCode::OK);
+
+    let cached_before_like = redis_json(&server.redis_url, &cache_key).await;
+    assert_eq!(cached_before_like["liked"], false);
+    assert!(cached_before_like["liked_at"].is_null());
+
+    create_like(&server, "tok_user_1", content_type, content_id).await;
+    let cached_after_like = redis_json(&server.redis_url, &cache_key).await;
+    assert_eq!(cached_after_like["liked"], true);
+    assert!(cached_after_like["liked_at"].as_str().is_some());
+
+    let unlike_response = server
+        .client
+        .delete(format!(
+            "{}/v1/likes/{content_type}/{content_id}",
+            server.base_url
+        ))
+        .bearer_auth("tok_user_1")
+        .send()
+        .await
+        .expect("delete like request must succeed");
+    assert_eq!(unlike_response.status(), StatusCode::OK);
+
+    let cached_after_unlike = redis_json(&server.redis_url, &cache_key).await;
+    assert_eq!(cached_after_unlike["liked"], false);
+    assert!(cached_after_unlike["liked_at"].is_null());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn top_likes_response_is_cached_in_redis() {
+    let server = TestServer::spawn(|config| {
+        config.leaderboard_refresh_interval_seconds = 120;
+    })
+    .await;
+
+    create_like(
+        &server,
+        "tok_user_1",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+    create_like(
+        &server,
+        "tok_user_2",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+
+    let response = server
+        .client
+        .get(format!(
+            "{}/v1/likes/top?content_type=post&window=24h&limit=10",
+            server.base_url
+        ))
+        .send()
+        .await
+        .expect("top likes request must succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let cached = redis_json(&server.redis_url, "likes:top:24h:post:10").await;
+    assert_eq!(cached["window"], "24h");
+    assert_eq!(cached["content_type"], "post");
+    assert_eq!(cached["items"][0]["content_id"], "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1");
+    assert_eq!(cached["items"][0]["count"], 2);
 
     server.shutdown().await;
 }
@@ -1586,6 +1712,26 @@ async fn cleanup_redis(redis_url: &str) {
                 .expect("redis DEL must succeed");
         }
     }
+}
+
+async fn redis_string(redis_url: &str, key: &str) -> Option<String> {
+    let client = redis::Client::open(redis_url).expect("test redis url must be valid");
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("test redis connection must work");
+
+    connection
+        .get(key)
+        .await
+        .expect("redis GET must succeed")
+}
+
+async fn redis_json(redis_url: &str, key: &str) -> Value {
+    let value = redis_string(redis_url, key)
+        .await
+        .expect("expected redis key to exist");
+    serde_json::from_str(&value).expect("cached value must be valid json")
 }
 
 async fn create_like(server: &TestServer, token: &str, content_type: &str, content_id: &str) {
