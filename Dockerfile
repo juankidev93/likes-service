@@ -19,9 +19,9 @@ RUN apt-get update \
 COPY --from=builder /app/target/release/likes-service /usr/local/bin/likes-service
 
 ENV SERVICE_HOST=0.0.0.0
-ENV HTTP_PORT=3000
+ENV HTTP_PORT=8080
 
-EXPOSE 3000
+EXPOSE 8080
 
 USER likes
 

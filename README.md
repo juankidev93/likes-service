@@ -24,7 +24,7 @@ docker compose up --build
 The API will be available at:
 
 ```text
-http://127.0.0.1:3000
+http://127.0.0.1:8080
 ```
 
 If you want to recreate the database from scratch:
@@ -127,7 +127,7 @@ The three content mock services share the same executable and mock implementatio
 Create a like:
 
 ```bash
-curl -i -X POST http://127.0.0.1:3000/v1/likes \
+curl -i -X POST http://127.0.0.1:8080/v1/likes \
   -H 'Authorization: Bearer tok_user_1' \
   -H 'content-type: application/json' \
   -d '{"content_type":"post","content_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"}'
@@ -136,25 +136,25 @@ curl -i -X POST http://127.0.0.1:3000/v1/likes \
 Get the count:
 
 ```bash
-curl -i http://127.0.0.1:3000/v1/likes/post/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1/count
+curl -i http://127.0.0.1:8080/v1/likes/post/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1/count
 ```
 
 Get top likes:
 
 ```bash
-curl -i 'http://127.0.0.1:3000/v1/likes/top?window=all&limit=10'
+curl -i 'http://127.0.0.1:8080/v1/likes/top?window=all&limit=10'
 ```
 
 Filtered top likes:
 
 ```bash
-curl -i 'http://127.0.0.1:3000/v1/likes/top?content_type=post&window=7d&limit=10'
+curl -i 'http://127.0.0.1:8080/v1/likes/top?content_type=post&window=7d&limit=10'
 ```
 
 Open the SSE stream:
 
 ```bash
-curl -N 'http://127.0.0.1:3000/v1/likes/stream?content_type=post&content_id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'
+curl -N 'http://127.0.0.1:8080/v1/likes/stream?content_type=post&content_id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1'
 ```
 
 ## Pagination
