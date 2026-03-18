@@ -382,7 +382,7 @@ mod tests {
     fn cursor_roundtrip_preserves_fields() {
         let row = UserLikeRow {
             content_type: "post".to_string(),
-            content_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1".to_string(),
+            content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
             liked_at: "2026-02-02T17:00:00Z".to_string(),
         };
 

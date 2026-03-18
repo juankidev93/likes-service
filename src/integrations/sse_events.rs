@@ -33,7 +33,7 @@ impl LikeEvents {
     ) -> redis::RedisResult<()> {
         self.publish_event(content_type, content_id, LikeEvent {
             event: "like".to_string(),
-            user_id: user_id.to_string(),
+            user_id: user_id.as_external_id(),
             content_type: content_type.to_string(),
             content_id: content_id.to_string(),
             count,
@@ -53,7 +53,7 @@ impl LikeEvents {
     ) -> redis::RedisResult<()> {
         self.publish_event(content_type, content_id, LikeEvent {
             event: "unlike".to_string(),
-            user_id: user_id.to_string(),
+            user_id: user_id.as_external_id(),
             content_type: content_type.to_string(),
             content_id: content_id.to_string(),
             count,

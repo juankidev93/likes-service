@@ -80,6 +80,10 @@ impl UserId {
     pub fn as_uuid(&self) -> Uuid {
         self.0
     }
+
+    pub fn as_external_id(&self) -> String {
+        format!("usr_{}", self.0)
+    }
 }
 
 impl fmt::Display for UserId {
@@ -92,7 +96,9 @@ impl FromStr for UserId {
     type Err = DomainError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Uuid::parse_str(value)
+        let normalized = value.trim().strip_prefix("usr_").unwrap_or(value.trim());
+
+        Uuid::parse_str(normalized)
             .map(Self)
             .map_err(|_| DomainError::InvalidUserId(value.to_string()))
     }

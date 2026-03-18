@@ -442,7 +442,7 @@ async fn like_status_cache_is_refreshed_after_like_and_unlike() {
     .await;
     let content_type = "post";
     let content_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
-    let user_id = "11111111-1111-1111-1111-111111111111";
+    let user_id = "550e8400-e29b-41d4-a716-446655440001";
     let cache_key = format!("likes:status:{user_id}:{content_type}:{content_id}");
 
     let initial_response = server
@@ -1428,7 +1428,7 @@ async fn likes_stream_emits_like_event() {
 
     let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
     assert!(chunk.contains("\"event\":\"like\""));
-    assert!(chunk.contains("\"user_id\":\"11111111-1111-1111-1111-111111111111\""));
+    assert!(chunk.contains("\"user_id\":\"usr_550e8400-e29b-41d4-a716-446655440001\""));
     assert!(chunk.contains("\"count\":1"));
 
     server.shutdown().await;
@@ -1491,7 +1491,7 @@ async fn likes_stream_emits_unlike_event() {
 
     let chunk = String::from_utf8(first_chunk.to_vec()).expect("chunk must be utf8");
     assert!(chunk.contains("\"event\":\"unlike\""));
-    assert!(chunk.contains("\"user_id\":\"11111111-1111-1111-1111-111111111111\""));
+    assert!(chunk.contains("\"user_id\":\"usr_550e8400-e29b-41d4-a716-446655440001\""));
     assert!(chunk.contains("\"count\":0"));
 
     server.shutdown().await;
@@ -1507,7 +1507,7 @@ async fn count_falls_back_to_postgres_when_redis_is_unavailable() {
 
     insert_like_directly(
         &server.database_url,
-        "11111111-1111-1111-1111-111111111111",
+        "550e8400-e29b-41d4-a716-446655440001",
         "post",
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
     )
@@ -1995,8 +1995,8 @@ async fn spawn_profile_mock_server(address: SocketAddr) -> AuxiliaryServer {
         get(|| async {
             Json(json!({
                 "valid": true,
-                "user_id": "11111111-1111-1111-1111-111111111111",
-                "display_name": "Alice Test"
+                "user_id": "usr_550e8400-e29b-41d4-a716-446655440001",
+                "display_name": "Test User 1"
             }))
         }),
     );
@@ -2034,16 +2034,16 @@ async fn spawn_grpc_dependency_mock_server(address: SocketAddr) -> AuxiliaryServ
                         AxumStatusCode::OK,
                         Json(json!({
                             "valid": true,
-                            "user_id": "11111111-1111-1111-1111-111111111111",
-                            "display_name": "Alice Test"
+                            "user_id": "usr_550e8400-e29b-41d4-a716-446655440001",
+                            "display_name": "Test User 1"
                         })),
                     ),
                     "Bearer tok_user_2" => (
                         AxumStatusCode::OK,
                         Json(json!({
                             "valid": true,
-                            "user_id": "22222222-2222-2222-2222-222222222222",
-                            "display_name": "Bob Test"
+                            "user_id": "usr_550e8400-e29b-41d4-a716-446655440002",
+                            "display_name": "Test User 2"
                         })),
                     ),
                     _ => (

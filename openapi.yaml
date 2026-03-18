@@ -336,10 +336,10 @@ paths:
               examples:
                 like:
                   value: |-
-                    data: {"event":"like","user_id":"11111111-1111-1111-1111-111111111111","count":42,"timestamp":"2026-02-02T17:00:01Z"}
+                    data: {"event":"like","user_id":"usr_550e8400-e29b-41d4-a716-446655440001","count":42,"timestamp":"2026-02-02T17:00:01Z"}
                 unlike:
                   value: |-
-                    data: {"event":"unlike","user_id":"11111111-1111-1111-1111-111111111111","count":41,"timestamp":"2026-02-02T17:00:05Z"}
+                    data: {"event":"unlike","user_id":"usr_550e8400-e29b-41d4-a716-446655440001","count":41,"timestamp":"2026-02-02T17:00:05Z"}
                 heartbeat:
                   value: |-
                     data: {"event":"heartbeat","timestamp":"2026-02-02T17:00:15Z"}
