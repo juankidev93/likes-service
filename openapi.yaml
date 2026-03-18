@@ -343,6 +343,9 @@ paths:
                 heartbeat:
                   value: |-
                     data: {"event":"heartbeat","timestamp":"2026-02-02T17:00:15Z"}
+                shutdown:
+                  value: |-
+                    data: {"event":"shutdown","timestamp":"2026-02-02T17:00:30Z"}
         '400':
           $ref: '#/components/responses/InvalidStreamRequestResponse'
         '429':

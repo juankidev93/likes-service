@@ -54,6 +54,13 @@ pub(crate) async fn stream_like_events(
             tokio::select! {
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
+                        let payload = json!({
+                            "event": "shutdown",
+                            "timestamp": current_timestamp(),
+                        });
+
+                        record_sse_event_sent(LIKE_EVENTS_STREAM_NAME, "shutdown");
+                        yield Ok::<Event, Infallible>(Event::default().data(payload.to_string()));
                         break;
                     }
                 }

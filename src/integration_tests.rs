@@ -1274,18 +1274,30 @@ async fn graceful_shutdown_closes_sse_connections() {
     let mut response = response;
 
     server.trigger_shutdown();
+
+    let shutdown_chunk = tokio::time::timeout(Duration::from_secs(2), async {
+        response.chunk().await
+    })
+    .await
+    .expect("stream should emit shutdown promptly")
+    .expect("shutdown chunk read should succeed")
+    .expect("stream should emit a shutdown chunk before closing");
+
+    let shutdown_chunk = String::from_utf8(shutdown_chunk.to_vec()).expect("shutdown chunk must be utf8");
+    assert!(shutdown_chunk.contains("\"event\":\"shutdown\""));
+
     server.wait_for_shutdown().await;
 
     let next_chunk = tokio::time::timeout(Duration::from_secs(2), async {
         response.chunk().await
     })
     .await
-    .expect("stream should close promptly after shutdown")
-    .expect("chunk read after shutdown should succeed");
+    .expect("stream should close promptly after shutdown event")
+    .expect("chunk read after shutdown event should succeed");
 
     assert!(
         next_chunk.is_none(),
-        "stream should be closed after graceful shutdown"
+        "stream should be closed after graceful shutdown event"
     );
 
     server.cleanup().await;
