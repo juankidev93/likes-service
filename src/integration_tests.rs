@@ -769,6 +769,102 @@ async fn like_then_count_returns_updated_value() {
 
 #[tokio::test]
 #[serial]
+async fn public_count_supports_etag_and_not_modified() {
+    let server = TestServer::spawn(|_| {}).await;
+    let url = format!(
+        "{}/v1/likes/post/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1/count",
+        server.base_url
+    );
+
+    let first_response = server
+        .client
+        .get(&url)
+        .send()
+        .await
+        .expect("count request must succeed");
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+    assert_eq!(
+        first_response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("public, max-age=5, stale-while-revalidate=55")
+    );
+
+    let etag = first_response
+        .headers()
+        .get("etag")
+        .and_then(|value| value.to_str().ok())
+        .expect("count response must return etag")
+        .to_string();
+
+    let second_response = server
+        .client
+        .get(&url)
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .expect("conditional count request must succeed");
+
+    assert_eq!(second_response.status(), StatusCode::NOT_MODIFIED);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
+async fn public_top_likes_supports_etag_and_not_modified() {
+    let server = TestServer::spawn(|_| {}).await;
+
+    create_like(
+        &server,
+        "tok_user_1",
+        "post",
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+    )
+    .await;
+
+    let url = format!("{}/v1/likes/top?window=24h&limit=10", server.base_url);
+
+    let first_response = server
+        .client
+        .get(&url)
+        .send()
+        .await
+        .expect("top likes request must succeed");
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+    assert_eq!(
+        first_response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("public, max-age=30, stale-while-revalidate=30")
+    );
+
+    let etag = first_response
+        .headers()
+        .get("etag")
+        .and_then(|value| value.to_str().ok())
+        .expect("top likes response must return etag")
+        .to_string();
+
+    let second_response = server
+        .client
+        .get(&url)
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .expect("conditional top likes request must succeed");
+
+    assert_eq!(second_response.status(), StatusCode::NOT_MODIFIED);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn write_rate_limit_returns_429_when_exceeded() {
     let server = TestServer::spawn(|config| {
         config.write_rate_limit_per_minute = 1;

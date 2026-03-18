@@ -8,7 +8,7 @@ use crate::use_cases::LikesUseCases;
 use axum::{
     Json,
     extract::{Extension, Path, State},
-    http::StatusCode,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use std::str::FromStr;
@@ -17,9 +17,9 @@ use super::dto::{
     CreateLikeRequest, LikeCountResponse, LikeResponse, LikeStatusResponse, UnlikeResponse,
 };
 use super::helpers::{
-    cache_like_count, cache_like_status, get_cached_like_count, get_cached_like_status,
-    like_count_cache_key, parse_authenticated_user_id, publish_like_count_update,
-    store_local_like_count, success,
+    cache_control_for_count, cache_like_count, cache_like_status, count_response_etag,
+    get_cached_like_count, get_cached_like_status, if_none_match_matches, like_count_cache_key,
+    parse_authenticated_user_id, publish_like_count_update, store_local_like_count, success,
 };
 
 pub(crate) async fn create_like(
@@ -267,6 +267,7 @@ pub(crate) async fn get_like_status(
 
 pub(crate) async fn get_like_count(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((content_type, content_id)): Path<(String, String)>,
 ) -> Response {
     let content_type = match ContentType::from_str(&content_type) {
@@ -281,16 +282,14 @@ pub(crate) async fn get_like_count(
 
     let repository = PostgresLikesRepository::new(&state.read_db_pool);
     let cache_key = like_count_cache_key(&content_type, &content_id);
+    let if_none_match = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok());
 
     match get_cached_like_count(&state, &cache_key).await {
         Ok(Some(count)) => {
             record_cache_operation("get_like_count", "hit");
-            return success(Json(LikeCountResponse {
-                content_type: content_type.to_string(),
-                content_id: content_id.to_string(),
-                count,
-            }))
-            .into_response();
+            return build_count_response(&content_type, &content_id, count, if_none_match);
         }
         Ok(None) => {
             record_cache_operation("get_like_count", "miss");
@@ -318,12 +317,7 @@ pub(crate) async fn get_like_count(
                             tracing::warn!(service = "likes_service", error = %error, "failed to populate redis cache for get_like_count");
                         }
 
-                        return success(Json(LikeCountResponse::from_parts(
-                            &content_type,
-                            &content_id,
-                            count.count,
-                        )))
-                        .into_response();
+                        return build_count_response(&content_type, &content_id, count.count, if_none_match);
                     }
                     Err(error) => return error.into_response(),
                 }
@@ -356,4 +350,42 @@ pub(crate) async fn get_like_count(
             }
         }
     }
+}
+
+fn build_count_response(
+    content_type: &ContentType,
+    content_id: &ContentId,
+    count: i64,
+    if_none_match: Option<&str>,
+) -> Response {
+    let etag = count_response_etag(content_type, content_id, count);
+
+    if if_none_match_matches(if_none_match, &etag) {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        response.headers_mut().insert(
+            header::ETAG,
+            HeaderValue::from_str(&etag).expect("etag header must be valid"),
+        );
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static(cache_control_for_count()),
+        );
+        return response;
+    }
+
+    let mut response = success(Json(LikeCountResponse::from_parts(
+        content_type,
+        content_id,
+        count,
+    )))
+    .into_response();
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("etag header must be valid"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control_for_count()),
+    );
+    response
 }

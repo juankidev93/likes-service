@@ -4,6 +4,7 @@ use crate::error::AppError;
 use crate::storage::likes_repository::PostgresLikesRepository;
 use axum::{
     extract::{Query, State},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     Json,
 };
@@ -11,16 +12,18 @@ use std::str::FromStr;
 
 use super::dto::{TopLikeItemResponse, TopLikesQuery, TopLikesResponse};
 use super::helpers::{
-    cache_top_likes, get_cached_top_likes, parse_top_likes_limit, parse_top_likes_window, success,
-    top_likes_cache_key,
+    cache_control_for_top_likes, cache_top_likes, get_cached_top_likes, if_none_match_matches,
+    parse_top_likes_limit, parse_top_likes_window, success, top_likes_cache_key,
+    top_likes_response_etag,
 };
 
 pub(crate) async fn get_top_likes(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<TopLikesQuery>,
 ) -> Response {
     match build_top_likes_response(&state, query).await {
-        Ok(response) => success(Json(response)).into_response(),
+        Ok(response) => build_top_likes_http_response(response, &headers),
         Err(error) => error.into_response(),
     }
 }
@@ -86,4 +89,35 @@ fn map_top_like_row(row: crate::storage::likes_repository::TopLikeRow) -> TopLik
         content_id: row.content_id,
         count: row.like_count,
     }
+}
+
+fn build_top_likes_http_response(response: TopLikesResponse, headers: &HeaderMap) -> Response {
+    let etag = top_likes_response_etag(&response);
+    let if_none_match = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok());
+
+    if if_none_match_matches(if_none_match, &etag) {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        response.headers_mut().insert(
+            header::ETAG,
+            HeaderValue::from_str(&etag).expect("etag header must be valid"),
+        );
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static(cache_control_for_top_likes()),
+        );
+        return response;
+    }
+
+    let mut response = success(Json(response)).into_response();
+    response.headers_mut().insert(
+        header::ETAG,
+        HeaderValue::from_str(&etag).expect("etag header must be valid"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control_for_top_likes()),
+    );
+    response
 }

@@ -29,6 +29,52 @@ pub(super) fn success<T>(payload: Json<T>) -> (StatusCode, Json<T>) {
     (StatusCode::OK, payload)
 }
 
+pub(crate) fn cache_control_for_count() -> &'static str {
+    "public, max-age=5, stale-while-revalidate=55"
+}
+
+pub(crate) fn cache_control_for_top_likes() -> &'static str {
+    "public, max-age=30, stale-while-revalidate=30"
+}
+
+pub(crate) fn count_response_etag(
+    content_type: &ContentType,
+    content_id: &ContentId,
+    count: i64,
+) -> String {
+    format!("\"count:{}:{}:{}\"", content_type, content_id, count)
+}
+
+pub(crate) fn top_likes_response_etag(response: &TopLikesResponse) -> String {
+    let mut raw = format!(
+        "top:{}:{}",
+        response.window,
+        response.content_type.as_deref().unwrap_or("all")
+    );
+
+    for item in &response.items {
+        raw.push('|');
+        raw.push_str(&item.content_type);
+        raw.push(':');
+        raw.push_str(&item.content_id);
+        raw.push(':');
+        raw.push_str(&item.count.to_string());
+    }
+
+    format!("\"{}\"", STANDARD.encode(raw))
+}
+
+pub(crate) fn if_none_match_matches(header_value: Option<&str>, etag: &str) -> bool {
+    let Some(header_value) = header_value else {
+        return false;
+    };
+
+    header_value
+        .split(',')
+        .map(str::trim)
+        .any(|candidate| candidate == "*" || candidate == etag)
+}
+
 pub(super) fn like_count_cache_key(content_type: &ContentType, content_id: &ContentId) -> String {
     format!("likes:count:{content_type}:{content_id}")
 }
