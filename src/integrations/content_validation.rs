@@ -7,6 +7,7 @@ use redis::AsyncCommands;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, time::Instant};
+use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct ContentValidationClient {
@@ -57,6 +58,15 @@ impl ContentValidationClient {
                 "circuit_open",
                 0.0,
             );
+            warn!(
+                service = "likes_service",
+                dependency = "content_api",
+                method = "GET /v1/{content_type}/{content_id}",
+                latency_ms = 0,
+                success = false,
+                status = "circuit_open",
+                "external call blocked by circuit breaker"
+            );
             return Err(ContentValidationError::DependencyUnavailable(error.to_string()));
         }
 
@@ -74,6 +84,13 @@ impl ContentValidationClient {
             Ok(response) => response,
             Err(error) => {
                 self.circuit_breaker.record_failure();
+                log_external_call(
+                    "content_api",
+                    "GET /v1/{content_type}/{content_id}",
+                    start.elapsed().as_secs_f64(),
+                    false,
+                    "network_error",
+                );
                 record_external_call(
                     "content_api",
                     "GET /v1/{content_type}/{content_id}",
@@ -85,11 +102,19 @@ impl ContentValidationClient {
         };
 
         let status = response.status();
+        let latency_seconds = start.elapsed().as_secs_f64();
+        log_external_call(
+            "content_api",
+            "GET /v1/{content_type}/{content_id}",
+            latency_seconds,
+            status.is_success() || status == StatusCode::NOT_FOUND,
+            status.as_str(),
+        );
         record_external_call(
             "content_api",
             "GET /v1/{content_type}/{content_id}",
             status.as_str(),
-            start.elapsed().as_secs_f64(),
+            latency_seconds,
         );
 
         match status {
@@ -144,6 +169,15 @@ impl ContentValidationClient {
                     "circuit_open",
                     0.0,
                 );
+                warn!(
+                    service = "likes_service",
+                    dependency = "content_api",
+                    method = "GET /v1/{content_type}/{content_id}",
+                    latency_ms = 0,
+                    success = false,
+                    status = "circuit_open",
+                    "external call blocked by circuit breaker"
+                );
                 last_error = Some(ContentValidationError::DependencyUnavailable(error.to_string()));
                 continue;
             }
@@ -162,6 +196,13 @@ impl ContentValidationClient {
                 Ok(response) => response,
                 Err(error) => {
                     self.circuit_breaker.record_failure();
+                    log_external_call(
+                        "content_api",
+                        "GET /v1/{content_type}/{content_id}",
+                        start.elapsed().as_secs_f64(),
+                        false,
+                        "network_error",
+                    );
                     record_external_call(
                         "content_api",
                         "GET /v1/{content_type}/{content_id}",
@@ -174,11 +215,19 @@ impl ContentValidationClient {
             };
 
             let status = response.status();
+            let latency_seconds = start.elapsed().as_secs_f64();
+            log_external_call(
+                "content_api",
+                "GET /v1/{content_type}/{content_id}",
+                latency_seconds,
+                status.is_success() || status == StatusCode::NOT_FOUND,
+                status.as_str(),
+            );
             record_external_call(
                 "content_api",
                 "GET /v1/{content_type}/{content_id}",
                 status.as_str(),
-                start.elapsed().as_secs_f64(),
+                latency_seconds,
             );
 
             match status {
@@ -276,6 +325,38 @@ impl ContentValidationClient {
             record_cache_operation("validate_content", "error");
             tracing::warn!(service = "likes_service", error = %error, "failed to write content validation cache entry");
         }
+    }
+}
+
+fn log_external_call(
+    dependency: &'static str,
+    method: &'static str,
+    latency_seconds: f64,
+    success: bool,
+    status: &str,
+) {
+    let latency_ms = (latency_seconds * 1000.0).round() as u64;
+
+    if success {
+        info!(
+            service = "likes_service",
+            dependency = dependency,
+            method = method,
+            latency_ms = latency_ms,
+            success = success,
+            status = status,
+            "external call completed"
+        );
+    } else {
+        warn!(
+            service = "likes_service",
+            dependency = dependency,
+            method = method,
+            latency_ms = latency_ms,
+            success = success,
+            status = status,
+            "external call failed"
+        );
     }
 }
 

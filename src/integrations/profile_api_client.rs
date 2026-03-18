@@ -5,6 +5,7 @@ use crate::resilience::circuit_breaker::CircuitBreaker;
 use reqwest::{header, Client, StatusCode};
 use serde::Deserialize;
 use std::{error::Error, fmt, time::Instant};
+use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct ProfileApiClient {
@@ -28,6 +29,15 @@ impl ProfileApiClient {
     ) -> Result<AuthenticatedUser, AuthError> {
         if let Err(error) = self.circuit_breaker.allow_request() {
             record_external_call("profile_api", "GET /v1/auth/validate", "circuit_open", 0.0);
+            warn!(
+                service = "likes_service",
+                dependency = "profile_api",
+                method = "GET /v1/auth/validate",
+                latency_ms = 0,
+                success = false,
+                status = "circuit_open",
+                "external call blocked by circuit breaker"
+            );
             return Err(AuthError::DependencyUnavailable(error.to_string()));
         }
 
@@ -43,6 +53,13 @@ impl ProfileApiClient {
             Ok(response) => response,
             Err(error) => {
                 self.circuit_breaker.record_failure();
+                log_external_call(
+                    "profile_api",
+                    "GET /v1/auth/validate",
+                    start.elapsed().as_secs_f64(),
+                    false,
+                    "network_error",
+                );
                 record_external_call(
                     "profile_api",
                     "GET /v1/auth/validate",
@@ -54,11 +71,20 @@ impl ProfileApiClient {
         };
 
         let status = response.status();
+        let latency_seconds = start.elapsed().as_secs_f64();
+        let success = status.is_success() || status == StatusCode::UNAUTHORIZED;
+        log_external_call(
+            "profile_api",
+            "GET /v1/auth/validate",
+            latency_seconds,
+            success,
+            status.as_str(),
+        );
         record_external_call(
             "profile_api",
             "GET /v1/auth/validate",
             status.as_str(),
-            start.elapsed().as_secs_f64(),
+            latency_seconds,
         );
 
         match status {
@@ -96,6 +122,15 @@ impl ProfileApiClient {
     pub async fn check_availability(&self) -> Result<(), AuthError> {
         if let Err(error) = self.circuit_breaker.allow_request() {
             record_external_call("profile_api", "GET /v1/auth/validate", "circuit_open", 0.0);
+            warn!(
+                service = "likes_service",
+                dependency = "profile_api",
+                method = "GET /v1/auth/validate",
+                latency_ms = 0,
+                success = false,
+                status = "circuit_open",
+                "external call blocked by circuit breaker"
+            );
             return Err(AuthError::DependencyUnavailable(error.to_string()));
         }
 
@@ -111,6 +146,13 @@ impl ProfileApiClient {
             Ok(response) => response,
             Err(error) => {
                 self.circuit_breaker.record_failure();
+                log_external_call(
+                    "profile_api",
+                    "GET /v1/auth/validate",
+                    start.elapsed().as_secs_f64(),
+                    false,
+                    "network_error",
+                );
                 record_external_call(
                     "profile_api",
                     "GET /v1/auth/validate",
@@ -122,11 +164,20 @@ impl ProfileApiClient {
         };
 
         let status = response.status();
+        let latency_seconds = start.elapsed().as_secs_f64();
+        let success = status.is_success() || status == StatusCode::UNAUTHORIZED;
+        log_external_call(
+            "profile_api",
+            "GET /v1/auth/validate",
+            latency_seconds,
+            success,
+            status.as_str(),
+        );
         record_external_call(
             "profile_api",
             "GET /v1/auth/validate",
             status.as_str(),
-            start.elapsed().as_secs_f64(),
+            latency_seconds,
         );
 
         match status {
@@ -141,6 +192,38 @@ impl ProfileApiClient {
                 )))
             }
         }
+    }
+}
+
+fn log_external_call(
+    dependency: &'static str,
+    method: &'static str,
+    latency_seconds: f64,
+    success: bool,
+    status: &str,
+) {
+    let latency_ms = (latency_seconds * 1000.0).round() as u64;
+
+    if success {
+        info!(
+            service = "likes_service",
+            dependency = dependency,
+            method = method,
+            latency_ms = latency_ms,
+            success = success,
+            status = status,
+            "external call completed"
+        );
+    } else {
+        warn!(
+            service = "likes_service",
+            dependency = dependency,
+            method = method,
+            latency_ms = latency_ms,
+            success = success,
+            status = status,
+            "external call failed"
+        );
     }
 }
 
