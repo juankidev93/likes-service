@@ -263,7 +263,9 @@ Notes:
 - The script is `RATE_LIMIT_AWARE=true` by default, so it avoids turning the benchmark into a pure rate-limit exercise.
 - `mixed` is a traffic ratio in the challenge, not a fixed total throughput target.
 - `MIXED_RATE=6666` keeps the `15%` batch share close to the standalone `1,000 rps` batch target.
-- In repeated local runs, the `read` benchmark at `10k rps` stabilized around `~5.5-6.7ms p99` with the app running as a host `--release` binary and `LOG_LEVEL=warn`. That is very close to the most aggressive `<5ms` target, but still sensitive to local machine conditions.
+- The `read` benchmark is measured in steady state. The k6 setup warms the hot `count` keys and the synthetic read limiter leases before the timed run starts, so the result reflects the hot path rather than cold cache fill or first-use coordination costs.
+- The per-process L1 cache for `GET /count` uses a long safety TTL and is refreshed push-style after writes, which keeps the hot path stable while still allowing recovery after cache loss or restarts.
+- In repeated local steady-state runs, the `read` benchmark at `10k rps` typically landed around `~3.5-5.3ms p99` with the app running as a host `--release` binary and `LOG_LEVEL=warn`, although occasional local-machine outliers still appeared in some runs.
 
 ## License
 
