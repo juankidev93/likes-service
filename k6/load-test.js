@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import exec from 'k6/execution';
 
-const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:3000';
+const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:8080';
 const BENCHMARK = (__ENV.BENCHMARK || 'read').toLowerCase();
 const RATE_LIMIT_AWARE = (__ENV.RATE_LIMIT_AWARE || 'true') === 'true';
 const READ_TARGET_RATE = Number(__ENV.READ_RATE || 10000);
@@ -24,11 +24,16 @@ const TOKENS = (__ENV.TOKENS || generateTokens(requiredTokenCount()))
   .filter(Boolean);
 
 const POST_IDS = (__ENV.POST_IDS || [
-  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1',
-  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2',
-  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3',
-  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4',
-  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa5',
+  '731b0395-4888-4822-b516-05b4b7bf2089',
+  '9601c044-6130-4ee5-a155-96570e05a02f',
+  '933dde0f-4744-4a66-9a38-bf5cb1f67553',
+  'ea0f2020-0509-45fd-adb9-24b8843055ee',
+  'bd27f926-0a00-41fd-b085-a7491e6d0902',
+  '2a656157-5284-48b5-9d76-ede492933347',
+  '4f884e5e-2f1d-4965-b0f1-16922acd91a2',
+  'ad1d9238-622c-4875-9881-5f8e19997783',
+  'c34ee1e3-7224-4a97-ba44-0993eb7a6ed8',
+  'c2b7f212-6162-4ae6-837b-16ee34cc9a50',
 ].join(','))
   .split(',')
   .map((value) => value.trim())
