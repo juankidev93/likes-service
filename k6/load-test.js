@@ -338,7 +338,7 @@ function requiredTokenCount() {
     }, 0);
 
   const safeWritesPerUserPerSecond =
-    Math.max(1, (WRITE_LIMIT_PER_MINUTE * WRITE_SAFETY_FACTOR) / 60);
+    Math.max(0.001, (WRITE_LIMIT_PER_MINUTE * WRITE_SAFETY_FACTOR) / 60);
 
   return Math.max(5, Math.ceil(writeRate / safeWritesPerUserPerSecond));
 }
