@@ -28,6 +28,7 @@ pub struct AppState {
     pub sse_heartbeat_interval_seconds: u64,
     pub local_like_count_cache: Arc<LocalLikeCountCache>,
     pub like_count_cache_inflight: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+    pub read_rate_limit_leases: Arc<Mutex<HashMap<String, ReadRateLimitLease>>>,
     pub mock_profiles: HashMap<String, MockProfile>,
     pub mock_content_store: HashMap<String, HashSet<String>>,
     pub content_type_registry: ContentTypeRegistry,
@@ -48,6 +49,13 @@ pub struct LikeCountCacheUpdate {
     pub content_type: String,
     pub content_id: String,
     pub count: i64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ReadRateLimitLease {
+    pub current_floor: u32,
+    pub remaining: u32,
+    pub reset_epoch_seconds: u64,
 }
 
 #[derive(Default)]

@@ -84,6 +84,23 @@ export function setup() {
     }
   }
 
+  for (const [index, item] of CONTENT_FIXTURES.entries()) {
+    http.get(`${BASE_URL}/v1/likes/${item.content_type}/${item.content_id}/count`, {
+      headers: warmupPublicHeaders(index),
+      tags: { endpoint: 'warmup_count' },
+    });
+  }
+
+  if (RATE_LIMIT_AWARE) {
+    for (let index = 0; index < READ_IP_POOL_SIZE; index += 1) {
+      const item = CONTENT_FIXTURES[index % CONTENT_FIXTURES.length];
+      http.get(`${BASE_URL}/v1/likes/${item.content_type}/${item.content_id}/count`, {
+        headers: warmupPublicHeaders(index),
+        tags: { endpoint: 'warmup_read_lease' },
+      });
+    }
+  }
+
   return { baseUrl: BASE_URL };
 }
 
@@ -187,6 +204,16 @@ function authHeaders(token) {
   };
 }
 
+function warmupPublicHeaders(index) {
+  const headers = jsonHeaders();
+
+  if (RATE_LIMIT_AWARE) {
+    headers['X-Forwarded-For'] = syntheticClientIpForIndex(index);
+  }
+
+  return headers;
+}
+
 function safeJson(response) {
   try {
     return response.json();
@@ -197,6 +224,10 @@ function safeJson(response) {
 
 function syntheticClientIp() {
   const iteration = exec.scenario.iterationInTest % READ_IP_POOL_SIZE;
+  return syntheticClientIpForIndex(iteration);
+}
+
+function syntheticClientIpForIndex(iteration) {
   const secondOctet = 113 + (Math.floor(iteration / 250) % 10);
   const thirdOctet = Math.floor(iteration / 50) % 250;
   const fourthOctet = (iteration % 50) + 1;

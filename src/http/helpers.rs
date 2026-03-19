@@ -16,7 +16,7 @@ const DEFAULT_USER_LIKES_LIMIT: usize = 20;
 pub(super) const MAX_BATCH_ITEMS: usize = 100;
 const DEFAULT_TOP_LIKES_LIMIT: usize = 10;
 const MAX_TOP_LIKES_LIMIT: usize = 50;
-const LOCAL_LIKE_COUNT_CACHE_TTL_MS: u64 = 5000;
+const LOCAL_LIKE_COUNT_CACHE_TTL_MS: u64 = 60000;
 pub(crate) const LIKE_COUNT_UPDATES_CHANNEL: &str = "likes:count_updates";
 
 pub(super) fn parse_authenticated_user_id(

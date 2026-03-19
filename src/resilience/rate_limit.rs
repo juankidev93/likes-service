@@ -1,4 +1,4 @@
-use crate::app_state::AppState;
+use crate::app_state::{AppState, ReadRateLimitLease};
 use crate::auth_middleware::authenticate_headers;
 use crate::error::{AppError, set_rate_limit_headers};
 use crate::infra::logging::LoggedUserId;
@@ -17,6 +17,7 @@ use tracing::warn;
 
 const WRITE_SCOPE: &str = "write_user";
 const READ_SCOPE: &str = "read_ip";
+const READ_LEASE_SIZE: u32 = 50;
 static RATE_LIMIT_INCREMENT_SCRIPT: Lazy<redis::Script> = Lazy::new(|| {
     redis::Script::new(
         r#"
@@ -25,6 +26,30 @@ static RATE_LIMIT_INCREMENT_SCRIPT: Lazy<redis::Script> = Lazy::new(|| {
             redis.call('EXPIRE', KEYS[1], ARGV[1])
         end
         return current
+        "#,
+    )
+});
+static RATE_LIMIT_RESERVE_SCRIPT: Lazy<redis::Script> = Lazy::new(|| {
+    redis::Script::new(
+        r#"
+        local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+        local ttl = tonumber(ARGV[1])
+        local requested = tonumber(ARGV[2])
+        local limit = tonumber(ARGV[3])
+
+        local remaining = limit - current
+        if remaining <= 0 then
+            return {current, 0}
+        end
+
+        local granted = math.min(requested, remaining)
+        current = redis.call('INCRBY', KEYS[1], granted)
+
+        if current == granted then
+            redis.call('EXPIRE', KEYS[1], ttl)
+        end
+
+        return {current, granted}
         "#,
     )
 });
@@ -98,19 +123,26 @@ pub async fn require_read_rate_limit(
     let (key, reset_epoch_seconds, retry_after_seconds) =
         rate_limit_window_key("read", &client_ip, now_seconds);
 
-    let rate_limit_state =
-        match increment_and_read_rate_limit(&state, &key, retry_after_seconds).await {
-            Ok(state) => state,
-            Err(error) => {
-                record_rate_limit_fail_open(READ_SCOPE);
-                warn!(
-                    service = "likes_service",
-                    error = %error,
-                    "redis unavailable for read rate limiting, allowing request"
-                );
-                return next.run(request).await;
-            }
-        };
+    let rate_limit_state = match consume_or_reserve_read_lease(
+        &state,
+        &key,
+        limit,
+        reset_epoch_seconds,
+        retry_after_seconds,
+    )
+    .await
+    {
+        Ok(state) => state,
+        Err(error) => {
+            record_rate_limit_fail_open(READ_SCOPE);
+            warn!(
+                service = "likes_service",
+                error = %error,
+                "redis unavailable for read rate limiting, allowing request"
+            );
+            return next.run(request).await;
+        }
+    };
 
     let remaining = limit.saturating_sub(rate_limit_state.current);
 
@@ -130,6 +162,91 @@ pub async fn require_read_rate_limit(
     let mut response = next.run(request).await;
     set_rate_limit_headers(&mut response, limit, remaining, reset_epoch_seconds, None);
     response
+}
+
+async fn consume_or_reserve_read_lease(
+    state: &AppState,
+    key: &str,
+    limit: u32,
+    reset_epoch_seconds: u64,
+    retry_after_seconds: u64,
+) -> Result<RateLimitState, redis::RedisError> {
+    if let Some(current) = try_consume_read_lease(state, key, reset_epoch_seconds).await {
+        return Ok(RateLimitState { current });
+    }
+
+    let (current_after_reservation, granted) =
+        reserve_read_lease(state, key, limit, retry_after_seconds).await?;
+
+    if granted == 0 {
+        return Ok(RateLimitState {
+            current: current_after_reservation.saturating_add(1),
+        });
+    }
+
+    let current_floor = current_after_reservation.saturating_sub(granted);
+    {
+        let mut leases = state.read_rate_limit_leases.lock().await;
+        leases.insert(
+            key.to_string(),
+            ReadRateLimitLease {
+                current_floor,
+                remaining: granted.saturating_sub(1),
+                reset_epoch_seconds,
+            },
+        );
+    }
+
+    Ok(RateLimitState {
+        current: current_floor.saturating_add(1),
+    })
+}
+
+async fn try_consume_read_lease(
+    state: &AppState,
+    key: &str,
+    reset_epoch_seconds: u64,
+) -> Option<u32> {
+    let mut leases = state.read_rate_limit_leases.lock().await;
+    let lease = leases.get_mut(key)?;
+
+    if lease.reset_epoch_seconds != reset_epoch_seconds {
+        leases.remove(key);
+        return None;
+    }
+
+    if lease.remaining == 0 {
+        leases.remove(key);
+        return None;
+    }
+
+    let consumed = lease.current_floor.saturating_add(1);
+    lease.current_floor = consumed;
+    lease.remaining = lease.remaining.saturating_sub(1);
+
+    if lease.remaining == 0 {
+        leases.remove(key);
+    }
+
+    Some(consumed)
+}
+
+async fn reserve_read_lease(
+    state: &AppState,
+    key: &str,
+    limit: u32,
+    retry_after_seconds: u64,
+) -> Result<(u32, u32), redis::RedisError> {
+    let mut connection = state.get_redis_connection().await?;
+    let response: (u32, u32) = RATE_LIMIT_RESERVE_SCRIPT
+        .key(key)
+        .arg(retry_after_seconds as i64)
+        .arg(READ_LEASE_SIZE as i64)
+        .arg(limit as i64)
+        .invoke_async(&mut connection)
+        .await?;
+
+    Ok(response)
 }
 
 async fn increment_and_read_rate_limit(
