@@ -37,8 +37,15 @@ docker compose up --build
 The Postgres schema is created from the versioned SQL files in `migrations/`.
 The application expects those migrations to be applied before startup and only validates that the required tables exist.
 
-For non-Docker local runs, use `.env.example` as a template for your shell environment.
-The service reads standard environment variables; it does not load `.env` files automatically.
+For host-based local runs, copy `.env.example` to `.env` and adjust values if needed:
+
+```bash
+cp .env.example .env
+docker compose up -d postgres redis mock-profile-api mock-post-api mock-bonus-hunter-api mock-top-picks-api
+cargo run --release
+```
+
+The service loads `.env` automatically when present, without overriding environment variables that are already exported by the shell.
 
 ## Main Environment Variables
 

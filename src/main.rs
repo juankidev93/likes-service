@@ -17,16 +17,19 @@ mod use_cases;
 mod integration_tests;
 
 use config::ServiceConfig;
+use dotenvy::Error as DotenvError;
 use grpc::{FILE_DESCRIPTOR_SET, GrpcLikesService};
 use infra::bootstrap::{build_app, build_app_state, build_mock_content_app, build_mock_profile_app};
 use infra::logging::init_tracing;
 use infra::metrics::init_metrics;
+use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tonic::transport::Server as GrpcServer;
 
 #[tokio::main]
 async fn main() {
+    load_dotenv();
     init_tracing();
     init_metrics();
 
@@ -131,6 +134,17 @@ async fn main() {
     }
 
     tracing::info!(service = "likes_service", "HTTP server stopped");
+}
+
+fn load_dotenv() {
+    match dotenvy::dotenv() {
+        Ok(_) => {}
+        Err(DotenvError::Io(error)) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            eprintln!("failed to load .env: {error}");
+            std::process::exit(1);
+        }
+    }
 }
 
 async fn run_mock_service(run_mode: &str) {
