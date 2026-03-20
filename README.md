@@ -276,11 +276,8 @@ k6 load testing:
 Example:
 
 ```bash
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
-READ_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
-REDIS_URL=redis://127.0.0.1:6379/ \
-SERVICE_HOST=127.0.0.1 \
-HTTP_PORT=8080 \
+cp .env.example .env
+docker compose up -d postgres redis mock-profile-api mock-post-api mock-bonus-hunter-api mock-top-picks-api
 LOG_LEVEL=warn \
 RUST_LOG=warn \
 cargo run --release
