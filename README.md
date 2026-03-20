@@ -131,6 +131,13 @@ The three content mock services share the same executable and mock implementatio
 
 ## Quick Examples
 
+Check liveness and readiness:
+
+```bash
+curl -i http://127.0.0.1:8080/health/live
+curl -i http://127.0.0.1:8080/health/ready
+```
+
 Create a like:
 
 ```bash
@@ -144,6 +151,20 @@ Get the count:
 
 ```bash
 curl -i http://127.0.0.1:8080/v1/likes/post/731b0395-4888-4822-b516-05b4b7bf2089/count
+```
+
+Get the authenticated status:
+
+```bash
+curl -i http://127.0.0.1:8080/v1/likes/post/731b0395-4888-4822-b516-05b4b7bf2089/status \
+  -H 'Authorization: Bearer tok_user_1'
+```
+
+Delete a like:
+
+```bash
+curl -i -X DELETE http://127.0.0.1:8080/v1/likes/post/731b0395-4888-4822-b516-05b4b7bf2089 \
+  -H 'Authorization: Bearer tok_user_1'
 ```
 
 Get top likes:
