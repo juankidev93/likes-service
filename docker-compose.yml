@@ -65,9 +65,7 @@ services:
       SSE_HEARTBEAT_INTERVAL_SECS: 15
       LEADERBOARD_REFRESH_INTERVAL_SECS: 60
       PROFILE_API_URL: http://mock-profile-api:8084
-      CONTENT_API_POST_URL: http://mock-post-api:8081
-      CONTENT_API_BONUS_HUNTER_URL: http://mock-bonus-hunter-api:8082
-      CONTENT_API_TOP_PICKS_URL: http://mock-top-picks-api:8083
+      CONTENT_API_REGISTRY: post=http://mock-post-api:8081,bonus_hunter=http://mock-bonus-hunter-api:8082,top_picks=http://mock-top-picks-api:8083
     ports:
       - "8080:8080"
     healthcheck:

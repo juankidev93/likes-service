@@ -23,6 +23,20 @@ pub async fn get_content(
             }),
         )
             .into_response(),
+        None
+            if state.content_type_registry.contains(content_type.as_str())
+                && uuid::Uuid::parse_str(&content_id).is_ok() =>
+        {
+            (
+                StatusCode::OK,
+                Json(ContentResponse {
+                    id: content_id,
+                    content_type,
+                    title: "Mock content".to_string(),
+                }),
+            )
+                .into_response()
+        }
         _ => not_found("content not found").into_response(),
     }
 }

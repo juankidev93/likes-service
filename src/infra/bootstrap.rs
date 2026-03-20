@@ -19,6 +19,7 @@ use axum::{Router, middleware, routing::get};
 use futures_util::StreamExt;
 use redis::AsyncCommands;
 use sqlx::postgres::PgPoolOptions;
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -144,20 +145,7 @@ pub fn build_app(app_state: AppState) -> Router {
 }
 
 fn build_content_type_registry(config: &ServiceConfig) -> ContentTypeRegistry {
-    ContentTypeRegistry::new(vec![
-        ContentApiDefinition {
-            content_type: "post".to_string(),
-            base_url: config.post_content_api_base_url.clone(),
-        },
-        ContentApiDefinition {
-            content_type: "bonus_hunter".to_string(),
-            base_url: config.bonus_hunter_content_api_base_url.clone(),
-        },
-        ContentApiDefinition {
-            content_type: "top_picks".to_string(),
-            base_url: config.top_picks_content_api_base_url.clone(),
-        },
-    ])
+    ContentTypeRegistry::new(config.content_api_definitions.clone())
 }
 
 async fn validate_required_schema(db_pool: &sqlx::PgPool) {
@@ -230,6 +218,7 @@ pub fn build_mock_profile_app() -> Router {
 }
 
 pub fn build_mock_content_app() -> Router {
+    let content_type_registry = build_mock_content_registry();
     let state = AppState {
         db_pool: sqlx::postgres::PgPoolOptions::new().connect_lazy("postgresql://unused").expect("lazy pool"),
         read_db_pool: sqlx::postgres::PgPoolOptions::new().connect_lazy("postgresql://unused").expect("lazy pool"),
@@ -246,7 +235,7 @@ pub fn build_mock_content_app() -> Router {
         read_rate_limit_leases: Arc::new(Default::default()),
         mock_profiles: build_mock_profiles(),
         mock_content_store: build_mock_content_store(),
-        content_type_registry: ContentTypeRegistry::new(Vec::new()),
+        content_type_registry,
         content_validation_client: ContentValidationClient::new(
             ContentTypeRegistry::new(Vec::new()),
             redis::Client::open("redis://127.0.0.1:6379/").expect("lazy redis client"),
@@ -266,6 +255,45 @@ pub fn build_mock_content_app() -> Router {
         .route("/v1/{content_type}/{content_id}", get(get_content))
         .with_state(state)
         .layer(middleware::from_fn(request_logging_middleware))
+}
+
+fn build_mock_content_registry() -> ContentTypeRegistry {
+    if let Ok(raw_registry) = env::var("CONTENT_API_REGISTRY") {
+        let definitions = raw_registry
+            .split(',')
+            .filter_map(|entry| {
+                let entry = entry.trim();
+                if entry.is_empty() {
+                    return None;
+                }
+
+                let (content_type, base_url) = entry.split_once('=')?;
+                Some(ContentApiDefinition {
+                    content_type: content_type.trim().to_ascii_lowercase(),
+                    base_url: base_url.trim().to_string(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if !definitions.is_empty() {
+            return ContentTypeRegistry::new(definitions);
+        }
+    }
+
+    ContentTypeRegistry::new(vec![
+        ContentApiDefinition {
+            content_type: "post".to_string(),
+            base_url: "http://mock-post-api".to_string(),
+        },
+        ContentApiDefinition {
+            content_type: "bonus_hunter".to_string(),
+            base_url: "http://mock-bonus-hunter-api".to_string(),
+        },
+        ContentApiDefinition {
+            content_type: "top_picks".to_string(),
+            base_url: "http://mock-top-picks-api".to_string(),
+        },
+    ])
 }
 
 fn spawn_like_count_cache_subscriber(state: AppState) {

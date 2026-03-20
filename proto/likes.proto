@@ -17,13 +17,6 @@ service LikesService {
   rpc GetTopLikes(GetTopLikesRequest) returns (GetTopLikesResponse);
 }
 
-enum ContentType {
-  CONTENT_TYPE_UNSPECIFIED = 0;
-  CONTENT_TYPE_POST = 1;
-  CONTENT_TYPE_BONUS_HUNTER = 2;
-  CONTENT_TYPE_TOP_PICKS = 3;
-}
-
 enum TopLikesWindow {
   TOP_LIKES_WINDOW_UNSPECIFIED = 0;
   TOP_LIKES_WINDOW_24H = 1;
@@ -33,13 +26,13 @@ enum TopLikesWindow {
 }
 
 message ContentRef {
-  ContentType content_type = 1;
+  string content_type = 1;
   string content_id = 2;
 }
 
 message LikeRequest {
   string session_token = 1;
-  ContentType content_type = 2;
+  string content_type = 2;
   string content_id = 3;
 }
 
@@ -52,7 +45,7 @@ message LikeResponse {
 
 message UnlikeRequest {
   string session_token = 1;
-  ContentType content_type = 2;
+  string content_type = 2;
   string content_id = 3;
 }
 
@@ -63,19 +56,19 @@ message UnlikeResponse {
 }
 
 message GetLikeCountRequest {
-  ContentType content_type = 1;
+  string content_type = 1;
   string content_id = 2;
 }
 
 message GetLikeCountResponse {
-  ContentType content_type = 1;
+  string content_type = 1;
   string content_id = 2;
   int64 count = 3;
 }
 
 message GetLikeStatusRequest {
   string session_token = 1;
-  ContentType content_type = 2;
+  string content_type = 2;
   string content_id = 3;
 }
 
@@ -86,13 +79,13 @@ message GetLikeStatusResponse {
 
 message GetUserLikesRequest {
   string session_token = 1;
-  optional ContentType content_type = 2;
+  optional string content_type = 2;
   optional string cursor = 3;
   optional uint32 limit = 4;
 }
 
 message UserLikeItem {
-  ContentType content_type = 1;
+  string content_type = 1;
   string content_id = 2;
   string liked_at = 3;
 }
@@ -108,7 +101,7 @@ message BatchGetLikeCountsRequest {
 }
 
 message BatchLikeCountItem {
-  ContentType content_type = 1;
+  string content_type = 1;
   string content_id = 2;
   int64 count = 3;
 }
@@ -123,7 +116,7 @@ message BatchGetLikeStatusesRequest {
 }
 
 message BatchLikeStatusItem {
-  ContentType content_type = 1;
+  string content_type = 1;
   string content_id = 2;
   bool liked = 3;
   optional string liked_at = 4;
@@ -134,20 +127,20 @@ message BatchGetLikeStatusesResponse {
 }
 
 message GetTopLikesRequest {
-  optional ContentType content_type = 1;
+  optional string content_type = 1;
   TopLikesWindow window = 2;
   optional uint32 limit = 3;
 }
 
 message TopLikeItem {
-  ContentType content_type = 1;
+  string content_type = 1;
   string content_id = 2;
   int64 count = 3;
 }
 
 message GetTopLikesResponse {
   TopLikesWindow window = 1;
-  optional ContentType content_type = 2;
+  optional string content_type = 2;
   repeated TopLikeItem items = 3;
 }
 

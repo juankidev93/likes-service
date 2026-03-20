@@ -37,9 +37,10 @@ docker compose up --build
 The Postgres schema is created from the versioned SQL files in `migrations/`.
 The application expects those migrations to be applied before startup and only validates that the required tables exist.
 
-For host-based local runs, copy `.env.example` to `.env` and adjust values if needed:
+For host-based local runs, stop the Dockerized `social-api` first if you already started the full stack, then copy `.env.example` to `.env` and adjust values if needed:
 
 ```bash
+docker compose stop social-api
 cp .env.example .env
 docker compose up -d postgres redis mock-profile-api mock-post-api mock-bonus-hunter-api mock-top-picks-api
 cargo run --release
@@ -75,17 +76,16 @@ Primary variables used by this service:
 - `SSE_HEARTBEAT_INTERVAL_SECS`
 - `LEADERBOARD_REFRESH_INTERVAL_SECS`
 - `PROFILE_API_URL`
-- `CONTENT_API_POST_URL`
-- `CONTENT_API_BONUS_HUNTER_URL`
-- `CONTENT_API_TOP_PICKS_URL`
+- `CONTENT_API_REGISTRY`
 
 They are already configured for local development in `docker-compose.yml`, and `.env.example` mirrors the same setup for host-based runs.
 The service fails fast on startup if required connection settings or external dependency URLs are missing.
 `CACHE_TTL_USER_STATUS_SECS` controls the Redis TTL for authenticated like-status responses, and `LEADERBOARD_REFRESH_INTERVAL_SECS` controls the Redis TTL for cached leaderboard responses.
+`CONTENT_API_REGISTRY` is the source of truth for content validation routing, for example `post=http://127.0.0.1:8081,bonus_hunter=http://127.0.0.1:8082,top_picks=http://127.0.0.1:8083,news_article=http://127.0.0.1:8085`.
 
 ## Tests
 
-To run the local integration test suite:
+With local Postgres and Redis available, run the integration test suite with:
 
 ```bash
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
@@ -198,6 +198,7 @@ curl -N 'http://127.0.0.1:8080/v1/likes/stream?content_type=post&content_id=731b
 
 - Postgres is the source of truth for `likes`, `like_counts`, and hourly leaderboard aggregates.
 - Redis is used for count caching, rate limiting, and SSE event fanout through Pub/Sub.
+- Content validation is resolved through a registry of `(content_type -> base_url)` definitions loaded from configuration. New content types can be introduced without code changes when using `CONTENT_API_REGISTRY`.
 - The repository includes local mock implementations for Profile API and Content API, and Compose runs them as separate services for local integration testing.
 - For local convenience, the main app router still exposes equivalent mock endpoints too, which keeps single-process runs simple at the cost of some extra surface area.
 - The container image runs as a non-root user and exposes a liveness `HEALTHCHECK` against `/health/live`.
@@ -255,9 +256,7 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
 READ_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
 REDIS_URL=redis://127.0.0.1:6379/ \
 PROFILE_API_URL=http://127.0.0.1:8084 \
-CONTENT_API_POST_URL=http://127.0.0.1:8081 \
-CONTENT_API_BONUS_HUNTER_URL=http://127.0.0.1:8082 \
-CONTENT_API_TOP_PICKS_URL=http://127.0.0.1:8083 \
+CONTENT_API_REGISTRY=post=http://127.0.0.1:8081,bonus_hunter=http://127.0.0.1:8082,top_picks=http://127.0.0.1:8083 \
 cargo run --release
 ```
 
@@ -277,6 +276,7 @@ Example:
 
 ```bash
 cp .env.example .env
+docker compose stop social-api
 docker compose up -d postgres redis mock-profile-api mock-post-api mock-bonus-hunter-api mock-top-picks-api
 LOG_LEVEL=warn \
 RUST_LOG=warn \

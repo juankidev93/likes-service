@@ -2,10 +2,11 @@ use crate::config::ServiceConfig;
 use crate::grpc::GrpcLikesService;
 use crate::grpc::pb::{
     BatchGetLikeCountsRequest, BatchGetLikeStatusesRequest, ContentRef,
-    ContentType as GrpcContentType, GetLikeCountRequest, GetLikeStatusRequest,
+    GetLikeCountRequest, GetLikeStatusRequest,
     GetTopLikesRequest, GetUserLikesRequest, LikeRequest, TopLikesWindow as GrpcTopLikesWindow,
     UnlikeRequest, likes_service_client::LikesServiceClient,
 };
+use crate::integrations::content_registry::ContentApiDefinition;
 use crate::infra::bootstrap::{build_app, build_app_state};
 use crate::infra::logging::init_tracing;
 use crate::infra::metrics::init_metrics;
@@ -163,21 +164,21 @@ async fn grpc_like_lifecycle_returns_expected_responses() {
 
     let count = client
         .get_like_count(GetLikeCountRequest {
-            content_type: GrpcContentType::Post as i32,
+            content_type: "post".to_string(),
             content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
         })
         .await
         .expect("get_like_count must succeed")
         .into_inner();
 
-    assert_eq!(count.content_type, GrpcContentType::Post as i32);
+    assert_eq!(count.content_type, "post");
     assert_eq!(count.content_id, "731b0395-4888-4822-b516-05b4b7bf2089");
     assert_eq!(count.count, 0);
 
     let like = client
         .like(LikeRequest {
             session_token: "tok_user_1".to_string(),
-            content_type: GrpcContentType::Post as i32,
+            content_type: "post".to_string(),
             content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
         })
         .await
@@ -192,7 +193,7 @@ async fn grpc_like_lifecycle_returns_expected_responses() {
     let status = client
         .get_like_status(GetLikeStatusRequest {
             session_token: "tok_user_1".to_string(),
-            content_type: GrpcContentType::Post as i32,
+            content_type: "post".to_string(),
             content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
         })
         .await
@@ -205,7 +206,7 @@ async fn grpc_like_lifecycle_returns_expected_responses() {
     let invalid_token = client
         .like(LikeRequest {
             session_token: "bad-token".to_string(),
-            content_type: GrpcContentType::Post as i32,
+            content_type: "post".to_string(),
             content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
         })
         .await
@@ -258,7 +259,7 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
     client
         .like(LikeRequest {
             session_token: "tok_user_1".to_string(),
-            content_type: GrpcContentType::Post as i32,
+            content_type: "post".to_string(),
             content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
         })
         .await
@@ -269,7 +270,7 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
     client
         .like(LikeRequest {
             session_token: "tok_user_1".to_string(),
-            content_type: GrpcContentType::BonusHunter as i32,
+            content_type: "bonus_hunter".to_string(),
             content_id: "c3d4e5f6-a7b8-9012-cdef-123456789012".to_string(),
         })
         .await
@@ -278,7 +279,7 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
     client
         .like(LikeRequest {
             session_token: "tok_user_2".to_string(),
-            content_type: GrpcContentType::Post as i32,
+            content_type: "post".to_string(),
             content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
         })
         .await
@@ -288,11 +289,11 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
         .batch_get_like_counts(BatchGetLikeCountsRequest {
             items: vec![
                 ContentRef {
-                    content_type: GrpcContentType::Post as i32,
+                    content_type: "post".to_string(),
                     content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
                 },
                 ContentRef {
-                    content_type: GrpcContentType::BonusHunter as i32,
+                    content_type: "bonus_hunter".to_string(),
                     content_id: "c3d4e5f6-a7b8-9012-cdef-123456789012".to_string(),
                 },
             ],
@@ -310,11 +311,11 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
             session_token: "tok_user_1".to_string(),
             items: vec![
                 ContentRef {
-                    content_type: GrpcContentType::Post as i32,
+                    content_type: "post".to_string(),
                     content_id: "731b0395-4888-4822-b516-05b4b7bf2089".to_string(),
                 },
                 ContentRef {
-                    content_type: GrpcContentType::BonusHunter as i32,
+                    content_type: "bonus_hunter".to_string(),
                     content_id: "c3d4e5f6-a7b8-9012-cdef-123456789012".to_string(),
                 },
             ],
@@ -342,7 +343,7 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
         .into_inner();
 
     assert_eq!(first_page.items.len(), 1);
-    assert_eq!(first_page.items[0].content_type, GrpcContentType::BonusHunter as i32);
+    assert_eq!(first_page.items[0].content_type, "bonus_hunter");
     assert!(first_page.has_more);
     let next_cursor = first_page
         .next_cursor
@@ -360,13 +361,13 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
         .into_inner();
 
     assert_eq!(second_page.items.len(), 1);
-    assert_eq!(second_page.items[0].content_type, GrpcContentType::Post as i32);
+    assert_eq!(second_page.items[0].content_type, "post");
     assert!(!second_page.has_more);
     assert!(second_page.next_cursor.is_none());
 
     let top = client
         .get_top_likes(GetTopLikesRequest {
-            content_type: Some(GrpcContentType::Post as i32),
+            content_type: Some("post".to_string()),
             window: GrpcTopLikesWindow::TopLikesWindow24h as i32,
             limit: Some(10),
         })
@@ -375,7 +376,7 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
         .into_inner();
 
     assert_eq!(top.window, GrpcTopLikesWindow::TopLikesWindow24h as i32);
-    assert_eq!(top.content_type, Some(GrpcContentType::Post as i32));
+    assert_eq!(top.content_type, Some("post".to_string()));
     assert_eq!(top.items.len(), 1);
     assert_eq!(top.items[0].content_id, "731b0395-4888-4822-b516-05b4b7bf2089");
     assert_eq!(top.items[0].count, 2);
@@ -383,7 +384,7 @@ async fn grpc_batch_listing_top_and_unlike_methods_return_expected_responses() {
     let unlike = client
         .unlike(UnlikeRequest {
             session_token: "tok_user_1".to_string(),
-            content_type: GrpcContentType::BonusHunter as i32,
+            content_type: "bonus_hunter".to_string(),
             content_id: "c3d4e5f6-a7b8-9012-cdef-123456789012".to_string(),
         })
         .await
@@ -992,9 +993,9 @@ async fn profile_api_circuit_breaker_opens_and_rejects_following_requests() {
 #[serial]
 async fn content_api_circuit_breaker_opens_and_rejects_following_requests() {
     let server = TestServer::spawn(|config| {
-        config.post_content_api_base_url = "http://127.0.0.1:9".to_string();
-        config.bonus_hunter_content_api_base_url = "http://127.0.0.1:9".to_string();
-        config.top_picks_content_api_base_url = "http://127.0.0.1:9".to_string();
+        for definition in &mut config.content_api_definitions {
+            definition.base_url = "http://127.0.0.1:9".to_string();
+        }
         config.circuit_breaker_failure_threshold = 1;
         config.circuit_breaker_open_seconds = 60;
     })
@@ -1126,7 +1127,11 @@ async fn profile_api_circuit_breaker_recovers_after_cooldown() {
 async fn content_api_circuit_breaker_recovers_after_cooldown() {
     let mock_address = unused_socket_addr();
     let server = TestServer::spawn(|config| {
-        config.post_content_api_base_url = format!("http://{}", mock_address);
+        for definition in &mut config.content_api_definitions {
+            if definition.content_type == "post" {
+                definition.base_url = format!("http://{}", mock_address);
+            }
+        }
         config.circuit_breaker_failure_threshold = 1;
         config.circuit_breaker_open_seconds = 1;
         config.circuit_breaker_success_threshold = 3;
@@ -1858,11 +1863,7 @@ impl TestServer {
         bootstrap_config.circuit_breaker_failure_window_seconds =
             config.circuit_breaker_failure_window_seconds;
         bootstrap_config.profile_api_base_url = config.profile_api_base_url.clone();
-        bootstrap_config.post_content_api_base_url = config.post_content_api_base_url.clone();
-        bootstrap_config.bonus_hunter_content_api_base_url =
-            config.bonus_hunter_content_api_base_url.clone();
-        bootstrap_config.top_picks_content_api_base_url =
-            config.top_picks_content_api_base_url.clone();
+        bootstrap_config.content_api_definitions = config.content_api_definitions.clone();
 
         let mut app_state = build_app_state(&bootstrap_config).await;
         let shutdown_signal = app_state.shutdown_signal.clone();
@@ -1973,9 +1974,20 @@ fn base_test_config(address: SocketAddr) -> ServiceConfig {
         sse_heartbeat_interval_seconds: 15,
         leaderboard_refresh_interval_seconds: 60,
         profile_api_base_url: format!("http://{}", address),
-        post_content_api_base_url: format!("http://{}", address),
-        bonus_hunter_content_api_base_url: format!("http://{}", address),
-        top_picks_content_api_base_url: format!("http://{}", address),
+        content_api_definitions: vec![
+            ContentApiDefinition {
+                content_type: "post".to_string(),
+                base_url: format!("http://{}", address),
+            },
+            ContentApiDefinition {
+                content_type: "bonus_hunter".to_string(),
+                base_url: format!("http://{}", address),
+            },
+            ContentApiDefinition {
+                content_type: "top_picks".to_string(),
+                base_url: format!("http://{}", address),
+            },
+        ],
     }
 }
 

@@ -114,7 +114,7 @@ impl LikesService for GrpcLikesService {
         request: Request<GetLikeCountRequest>,
     ) -> Result<Response<GetLikeCountResponse>, Status> {
         let request = request.into_inner();
-        let content_type = parse_content_type(request.content_type)?;
+        let content_type = parse_content_type(&request.content_type)?;
         let content_id = parse_content_id(&request.content_id)?;
         let repository = PostgresLikesRepository::new(&self.state.read_db_pool);
         let count = repository
@@ -186,7 +186,7 @@ impl LikesService for GrpcLikesService {
             items: page_rows
                 .into_iter()
                 .map(|row| UserLikeItem {
-                    content_type: content_type_to_proto(&row.content_type),
+                    content_type: row.content_type,
                     content_id: row.content_id,
                     liked_at: row.liked_at,
                 })
@@ -214,7 +214,7 @@ impl LikesService for GrpcLikesService {
                 .map(|(content_type, content_id)| {
                     let key = (content_type.to_string(), content_id.to_string());
                     BatchLikeCountItem {
-                        content_type: content_type_to_proto(content_type.as_str()),
+                        content_type: content_type.to_string(),
                         content_id: content_id.to_string(),
                         count: *counts.get(&key).unwrap_or(&0),
                     }
@@ -244,7 +244,7 @@ impl LikesService for GrpcLikesService {
                     let key = (content_type.to_string(), content_id.to_string());
                     let status = statuses.get(&key);
                     BatchLikeStatusItem {
-                        content_type: content_type_to_proto(content_type.as_str()),
+                        content_type: content_type.to_string(),
                         content_id: content_id.to_string(),
                         liked: status.map(|value| value.exists).unwrap_or(false),
                         liked_at: status.and_then(|value| value.liked_at.clone()),
@@ -271,11 +271,11 @@ impl LikesService for GrpcLikesService {
 
         Ok(Response::new(GetTopLikesResponse {
             window: top_window_to_proto(&window),
-            content_type: content_type.as_ref().map(|value| content_type_to_proto(value.as_str())),
+            content_type: content_type.as_ref().map(ToString::to_string),
             items: rows
                 .into_iter()
                 .map(|row| TopLikeItem {
-                    content_type: content_type_to_proto(&row.content_type),
+                    content_type: row.content_type,
                     content_id: row.content_id,
                     count: row.like_count,
                 })
@@ -292,25 +292,19 @@ fn parse_content_id(content_id: &str) -> Result<ContentId, Status> {
     ContentId::from_str(content_id).map_err(app_error_to_status)
 }
 
-fn parse_content_type(value: i32) -> Result<DomainContentType, Status> {
-    let proto = pb::ContentType::try_from(value)
-        .map_err(|_| Status::invalid_argument("invalid content_type enum"))?;
+fn parse_content_type(value: impl AsRef<str>) -> Result<DomainContentType, Status> {
+    let value = value.as_ref().trim();
 
-    let as_str = match proto {
-        pb::ContentType::Post => "post",
-        pb::ContentType::BonusHunter => "bonus_hunter",
-        pb::ContentType::TopPicks => "top_picks",
-        pb::ContentType::Unspecified => {
-            return Err(Status::invalid_argument("content_type is required"));
-        }
-    };
+    if value.is_empty() {
+        return Err(Status::invalid_argument("content_type is required"));
+    }
 
-    DomainContentType::from_str(as_str).map_err(app_error_to_status)
+    DomainContentType::from_str(value).map_err(app_error_to_status)
 }
 
 fn parse_content_refs(items: &[ContentRef]) -> Result<Vec<(DomainContentType, ContentId)>, Status> {
     items.iter()
-        .map(|item| Ok((parse_content_type(item.content_type)?, parse_content_id(&item.content_id)?)))
+        .map(|item| Ok((parse_content_type(&item.content_type)?, parse_content_id(&item.content_id)?)))
         .collect()
 }
 
@@ -333,15 +327,6 @@ fn top_window_to_proto(window: &TopLikesWindow) -> i32 {
         TopLikesWindow::Last7Days => pb::TopLikesWindow::TopLikesWindow7d as i32,
         TopLikesWindow::Last30Days => pb::TopLikesWindow::TopLikesWindow30d as i32,
         TopLikesWindow::All => pb::TopLikesWindow::All as i32,
-    }
-}
-
-fn content_type_to_proto(value: &str) -> i32 {
-    match value {
-        "post" => pb::ContentType::Post as i32,
-        "bonus_hunter" => pb::ContentType::BonusHunter as i32,
-        "top_picks" => pb::ContentType::TopPicks as i32,
-        _ => pb::ContentType::Unspecified as i32,
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::integrations::content_registry::ContentApiDefinition;
 use std::env;
 
 pub struct ServiceConfig {
@@ -26,9 +27,7 @@ pub struct ServiceConfig {
     #[allow(dead_code)]
     pub leaderboard_refresh_interval_seconds: u64,
     pub profile_api_base_url: String,
-    pub post_content_api_base_url: String,
-    pub bonus_hunter_content_api_base_url: String,
-    pub top_picks_content_api_base_url: String,
+    pub content_api_definitions: Vec<ContentApiDefinition>,
 }
 
 impl ServiceConfig {
@@ -102,22 +101,7 @@ impl ServiceConfig {
             return Err("PROFILE_API_URL cannot be empty".to_string());
         }
 
-        let post_content_api_base_url = get_required_string("CONTENT_API_POST_URL")?;
-        let bonus_hunter_content_api_base_url =
-            get_required_string("CONTENT_API_BONUS_HUNTER_URL")?;
-        let top_picks_content_api_base_url = get_required_string("CONTENT_API_TOP_PICKS_URL")?;
-
-        if post_content_api_base_url.trim().is_empty() {
-            return Err("CONTENT_API_POST_URL cannot be empty".to_string());
-        }
-
-        if bonus_hunter_content_api_base_url.trim().is_empty() {
-            return Err("CONTENT_API_BONUS_HUNTER_URL cannot be empty".to_string());
-        }
-
-        if top_picks_content_api_base_url.trim().is_empty() {
-            return Err("CONTENT_API_TOP_PICKS_URL cannot be empty".to_string());
-        }
+        let content_api_definitions = parse_content_api_definitions()?;
 
         Ok(Self {
             host,
@@ -142,9 +126,7 @@ impl ServiceConfig {
             sse_heartbeat_interval_seconds,
             leaderboard_refresh_interval_seconds,
             profile_api_base_url,
-            post_content_api_base_url,
-            bonus_hunter_content_api_base_url,
-            top_picks_content_api_base_url,
+            content_api_definitions,
         })
     }
 
@@ -180,4 +162,44 @@ where
             .map_err(|_| format!("{primary} must be a valid value, got '{value}'")),
         None => Ok(None),
     }
+}
+
+fn parse_content_api_definitions() -> Result<Vec<ContentApiDefinition>, String> {
+    let raw_registry = get_required_string("CONTENT_API_REGISTRY")?;
+    let mut definitions = Vec::new();
+
+    for entry in raw_registry.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+
+        let (content_type, base_url) = entry
+            .split_once('=')
+            .ok_or_else(|| {
+                format!(
+                    "CONTENT_API_REGISTRY entries must have the form content_type=url, got '{entry}'"
+                )
+            })?;
+
+        let content_type = content_type.trim().to_ascii_lowercase();
+        let base_url = base_url.trim().to_string();
+
+        if content_type.is_empty() || base_url.is_empty() {
+            return Err(format!(
+                "CONTENT_API_REGISTRY entries must have non-empty content type and url, got '{entry}'"
+            ));
+        }
+
+        definitions.push(ContentApiDefinition {
+            content_type,
+            base_url,
+        });
+    }
+
+    if definitions.is_empty() {
+        return Err("CONTENT_API_REGISTRY cannot be empty".to_string());
+    }
+
+    Ok(definitions)
 }

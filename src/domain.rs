@@ -5,19 +5,15 @@ use std::{fmt, str::FromStr, time::SystemTime};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ContentType {
-    Post,
-    BonusHunter,
-    TopPicks,
-}
+pub struct ContentType(String);
 
 impl ContentType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Post => "post",
-            Self::BonusHunter => "bonus_hunter",
-            Self::TopPicks => "top_picks",
-        }
+    pub fn new(value: impl Into<String>) -> Result<Self, DomainError> {
+        Self::from_str(&value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -31,12 +27,26 @@ impl FromStr for ContentType {
     type Err = DomainError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "post" => Ok(Self::Post),
-            "bonus_hunter" => Ok(Self::BonusHunter),
-            "top_picks" => Ok(Self::TopPicks),
-            _ => Err(DomainError::InvalidContentType(value.to_string())),
+        let normalized = value.trim().to_ascii_lowercase();
+
+        if normalized.is_empty() {
+            return Err(DomainError::InvalidContentType(value.to_string()));
         }
+
+        let mut chars = normalized.chars();
+        let Some(first) = chars.next() else {
+            return Err(DomainError::InvalidContentType(value.to_string()));
+        };
+
+        if !first.is_ascii_lowercase() {
+            return Err(DomainError::InvalidContentType(value.to_string()));
+        }
+
+        if !chars.all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_') {
+            return Err(DomainError::InvalidContentType(value.to_string()));
+        }
+
+        Ok(Self(normalized))
     }
 }
 

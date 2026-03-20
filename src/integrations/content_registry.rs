@@ -27,6 +27,10 @@ impl ContentTypeRegistry {
         self.definitions.get(content_type)
     }
 
+    pub fn contains(&self, content_type: &str) -> bool {
+        self.definitions.contains_key(content_type)
+    }
+
     pub fn all(&self) -> Vec<&ContentApiDefinition> {
         let mut definitions: Vec<_> = self.definitions.values().collect();
         definitions.sort_by(|left, right| left.content_type.cmp(&right.content_type));

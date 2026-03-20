@@ -731,7 +731,10 @@ components:
   schemas:
     ContentType:
       type: string
-      enum: [post, bonus_hunter, top_picks]
+      pattern: '^[a-z][a-z0-9_]*$'
+      description: |
+        Content type identifier. Supported values are driven by service configuration rather than a fixed schema enum.
+      example: post
     TopLikesWindow:
       type: string
       enum: [24h, 7d, 30d, all]
