@@ -15,6 +15,11 @@ Includes:
 
 ## Local Setup
 
+There are two supported local workflows:
+
+1. full stack in Docker
+2. dependencies in Docker + app running on the host with `cargo run --release`
+
 Start the full stack:
 
 ```bash
@@ -88,6 +93,15 @@ The service fails fast on startup if required connection settings or external de
 With local Postgres and Redis available, run the integration test suite with:
 
 ```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
+REDIS_URL=redis://127.0.0.1:6379/ \
+cargo test -- --test-threads=1
+```
+
+If you do not already have Postgres and Redis running locally, the simplest setup is:
+
+```bash
+docker compose up -d postgres redis
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
 REDIS_URL=redis://127.0.0.1:6379/ \
 cargo test -- --test-threads=1
@@ -246,18 +260,19 @@ gRPC:
 - In Docker Compose it is not enabled by default; in host-based local runs it is enabled by the provided `.env.example` unless you remove `GRPC_PORT`.
 - Server reflection is enabled, so `grpcurl` can inspect services and methods without passing the local proto file.
 - Supported methods: `Like`, `Unlike`, `GetLikeCount`, `GetLikeStatus`, `GetUserLikes`, `BatchGetLikeCounts`, `BatchGetLikeStatuses`, and `GetTopLikes`.
-- Example local run:
+- Example host-based local run:
 
 ```bash
-SERVICE_HOST=127.0.0.1 \
-HTTP_PORT=8080 \
-GRPC_PORT=50051 \
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
-READ_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/likes_service \
-REDIS_URL=redis://127.0.0.1:6379/ \
-PROFILE_API_URL=http://127.0.0.1:8084 \
-CONTENT_API_REGISTRY=post=http://127.0.0.1:8081,bonus_hunter=http://127.0.0.1:8082,top_picks=http://127.0.0.1:8083 \
+cp .env.example .env
+docker compose stop social-api
+docker compose up -d postgres redis mock-profile-api mock-post-api mock-bonus-hunter-api mock-top-picks-api
 cargo run --release
+```
+
+Then, for example:
+
+```bash
+grpcurl -plaintext 127.0.0.1:50051 list
 ```
 
 k6 load testing:
