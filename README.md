@@ -177,7 +177,8 @@ curl -N 'http://127.0.0.1:8080/v1/likes/stream?content_type=post&content_id=731b
 
 - Postgres is the source of truth for `likes`, `like_counts`, and hourly leaderboard aggregates.
 - Redis is used for count caching, rate limiting, and SSE event fanout through Pub/Sub.
-- Profile API and Content API are represented by internal mock endpoints so the service can be run and tested locally as a single process.
+- The repository includes local mock implementations for Profile API and Content API, and Compose runs them as separate services for local integration testing.
+- For local convenience, the main app router still exposes equivalent mock endpoints too, which keeps single-process runs simple at the cost of some extra surface area.
 - The container image runs as a non-root user and exposes a liveness `HEALTHCHECK` against `/health/live`.
 
 ## Trade-Offs
@@ -213,9 +214,14 @@ OpenAPI:
 - The HTTP contract is documented in [openapi.yaml](openapi.yaml).
 - Swagger UI is served at `/docs` and uses `/openapi.yaml` from the same origin.
 
+HTTP cache validators:
+- Public read endpoints `GET /v1/likes/{type}/{id}/count` and `GET /v1/likes/top` return `ETag` and `Cache-Control`.
+- Both endpoints support `If-None-Match` and can answer `304 Not Modified`, which makes them friendlier to browsers, CDNs, and reverse proxies.
+
 gRPC:
 - The repository includes [proto/likes.proto](proto/likes.proto) and an optional tonic-based gRPC server for the same likes domain.
-- The gRPC server reuses the same domain logic and persistence layer as the HTTP API. It is disabled by default and only starts when `GRPC_PORT` is set.
+- The gRPC server reuses the same domain logic and persistence layer as the HTTP API. It starts when `GRPC_PORT` is present in the environment.
+- In Docker Compose it is not enabled by default; in host-based local runs it is enabled by the provided `.env.example` unless you remove `GRPC_PORT`.
 - Server reflection is enabled, so `grpcurl` can inspect services and methods without passing the local proto file.
 - Supported methods: `Like`, `Unlike`, `GetLikeCount`, `GetLikeStatus`, `GetUserLikes`, `BatchGetLikeCounts`, `BatchGetLikeStatuses`, and `GetTopLikes`.
 - Example local run:
